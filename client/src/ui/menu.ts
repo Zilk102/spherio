@@ -641,7 +641,10 @@ export class MainMenu {
     const maxEl = document.getElementById("lobby-max") as HTMLInputElement | null;
     const maxVal = document.getElementById("lobby-max-val");
     maxEl?.addEventListener("input", () => {
-      if (maxVal && maxEl) maxVal.textContent = maxEl.value;
+      if (maxVal && maxEl) {
+        maxVal.textContent = maxEl.value;
+        maxEl.setAttribute("aria-valuenow", maxEl.value);
+      }
     });
 
     document.getElementById("btn-create-lobby")?.addEventListener("click", async () => {

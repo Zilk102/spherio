@@ -89,23 +89,54 @@
               <button type="button" class="drawer-close" data-drawer-close aria-label="Закрыть">×</button>
             </header>
             <div class="drawer-body">
-              <div class="drawer-panel" data-drawer-panel="lobby">
-                <p class="drawer-desc">Создайте комнату или введите код приглашения.</p>
-                <label class="field lobby-opt">
-                  <span class="field-label">Игроков в комнате</span>
-                  <input id="lobby-max" type="range" min="2" max="16" value="8" />
-                  <span id="lobby-max-val">8</span>
-                </label>
-                <label class="lobby-opt-check">
-                  <input id="lobby-bots" type="checkbox" />
-                  Боты в лобби
-                </label>
-                <button id="btn-create-lobby" type="button" class="btn btn-primary">Создать лобби</button>
-                <div id="lobby-created" class="invite-box hidden"></div>
-                <div class="field-row">
-                  <input id="lobby-code" type="text" maxlength="6" placeholder="Код комнаты" />
-                  <button id="btn-join-lobby" type="button" class="btn btn-accent">Войти</button>
-                </div>
+              <div class="drawer-panel hidden" data-drawer-panel="lobby">
+                <section class="lobby-card">
+                  <h3 class="lobby-card-title">Новая комната</h3>
+                  <div class="lobby-slider">
+                    <div class="lobby-slider-head">
+                      <span class="field-label">Игроков в комнате</span>
+                      <output id="lobby-max-val" class="lobby-slider-value" for="lobby-max">8</output>
+                    </div>
+                    <input
+                      id="lobby-max"
+                      class="lobby-range"
+                      type="range"
+                      min="2"
+                      max="16"
+                      value="8"
+                      aria-valuemin="2"
+                      aria-valuemax="16"
+                      aria-valuenow="8"
+                    />
+                  </div>
+                  <label class="lobby-toggle">
+                    <input id="lobby-bots" type="checkbox" />
+                    <span class="lobby-toggle-track" aria-hidden="true"></span>
+                    <span class="lobby-toggle-label">Боты в лобби</span>
+                  </label>
+                  <button id="btn-create-lobby" type="button" class="btn btn-primary lobby-create-btn">
+                    Создать лобби
+                  </button>
+                  <div id="lobby-created" class="invite-box hidden"></div>
+                </section>
+
+                <div class="lobby-or" aria-hidden="true"><span>или</span></div>
+
+                <section class="lobby-card lobby-card--join">
+                  <h3 class="lobby-card-title">Войти по коду</h3>
+                  <p class="lobby-card-desc">4–6 символов из приглашения друга</p>
+                  <div class="lobby-join-row">
+                    <input
+                      id="lobby-code"
+                      type="text"
+                      maxlength="6"
+                      placeholder="ABCD12"
+                      autocomplete="off"
+                      spellcheck="false"
+                    />
+                    <button id="btn-join-lobby" type="button" class="btn btn-accent">Войти</button>
+                  </div>
+                </section>
               </div>
 
               <div class="drawer-panel hidden" data-drawer-panel="skins">
