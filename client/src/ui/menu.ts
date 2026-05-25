@@ -25,6 +25,7 @@ import { joinPrivateArena, joinPublicArena } from "../net/colyseus.js";
 import { isTouchPrimaryDevice } from "../lib/touchDevice.js";
 import type { Room } from "colyseus.js";
 import { Game } from "../game/Game.js";
+import { SkinPreview3D } from "../game/SkinPreview3D.js";
 
 const SKIN_KEY = "sphere3d_skin";
 const SKIN_COLOR_KEY = "sphere3d_skin_color";
@@ -66,6 +67,7 @@ export class MainMenu {
   private game: Game | null = null;
   private leavePromise: Promise<void> | null = null;
   private activeDrawer: string | null = null;
+  private skinPreview3d: SkinPreview3D | null = null;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -82,6 +84,7 @@ export class MainMenu {
     this.bindLeave();
     this.bindPause();
     this.bindSkinColor();
+    this.bindSkinsDrawer();
     void this.initAuth();
   }
 
@@ -106,7 +109,45 @@ export class MainMenu {
       localStorage.setItem(SKIN_COLOR_KEY, String(this.skinColor));
       this.updateSkinPreview();
       this.renderSkins();
+      this.syncSkinPreview3d();
     });
+  }
+
+  private bindSkinsDrawer(): void {
+    document.getElementById("btn-skins-done")?.addEventListener("click", () => {
+      this.closeDrawer();
+    });
+    document.getElementById("btn-skin-reset-view")?.addEventListener("click", () => {
+      this.skinPreview3d?.resetView();
+    });
+  }
+
+  private getSkinPreview3d(): SkinPreview3D {
+    if (!this.skinPreview3d) {
+      const canvas = document.getElementById("skin-preview-canvas") as HTMLCanvasElement | null;
+      if (!canvas) throw new Error("skin-preview-canvas missing");
+      this.skinPreview3d = new SkinPreview3D(canvas);
+    }
+    return this.skinPreview3d;
+  }
+
+  private syncSkinPreview3d(): void {
+    const skin = getSkin(this.skinId);
+    if (!skin) return;
+    const color = this.displayColorForSkin(this.skinId);
+    try {
+      this.getSkinPreview3d().setSkin(this.skinId, color);
+    } catch {
+      /* canvas not mounted */
+    }
+    const title = document.getElementById("skins-preview-name");
+    if (title) title.textContent = skin.name;
+    const hint = document.getElementById("skins-hint");
+    if (hint) {
+      hint.textContent = skin.tintable
+        ? "Свой цвет · зажмите и поверните"
+        : "Зажмите и поверните, чтобы рассмотреть";
+    }
   }
 
   private bindLeave(): void {
@@ -278,11 +319,14 @@ export class MainMenu {
     const skin = getSkin(this.skinId);
     const row = document.getElementById("skin-color-row");
     const input = document.getElementById("skin-color") as HTMLInputElement | null;
+    const swatch = row?.querySelector(".skins-color-swatch") as HTMLElement | null;
     const show = skin?.tintable ?? false;
     row?.classList.toggle("hidden", !show);
     if (input && show) {
       const c = this.skinColor & 0xffffff;
-      input.value = `#${c.toString(16).padStart(6, "0")}`;
+      const hex = `#${c.toString(16).padStart(6, "0")}`;
+      input.value = hex;
+      if (swatch) swatch.style.background = hex;
     }
   }
 
@@ -319,7 +363,19 @@ export class MainMenu {
 
     if (id === "top") void this.loadLeaderboard("all");
     if (id === "friends") void this.loadFriends();
-    if (id === "skins") this.renderSkins();
+    if (id === "skins") {
+      drawer.dataset.activePanel = "skins";
+      this.renderSkins();
+      try {
+        this.getSkinPreview3d().start();
+        this.syncSkinPreview3d();
+      } catch {
+        /* ignore */
+      }
+    } else {
+      delete drawer.dataset.activePanel;
+      this.skinPreview3d?.stop();
+    }
     if (id === "account") this.updateAccountPanel();
   }
 
@@ -327,6 +383,8 @@ export class MainMenu {
     const drawer = document.getElementById("drawer");
     if (!drawer) return;
     this.activeDrawer = null;
+    delete drawer.dataset.activePanel;
+    this.skinPreview3d?.stop();
     drawer.setAttribute("aria-hidden", "true");
   }
 
@@ -766,7 +824,9 @@ export class MainMenu {
     for (const skin of skins) {
       const btn = document.createElement("button");
       btn.type = "button";
-      btn.className = "skin-chip" + (skin.id === this.skinId ? " selected" : "");
+      btn.className = "skin-chip skin-chip--strip" + (skin.id === this.skinId ? " selected" : "");
+      btn.setAttribute("role", "option");
+      btn.setAttribute("aria-selected", String(skin.id === this.skinId));
       const chipColor = skin.tintable ? this.skinColor : skin.defaultColor;
       btn.style.setProperty(
         "--skin-color",
@@ -792,11 +852,10 @@ export class MainMenu {
       }
       grid.append(btn);
     }
-    const hint = document.getElementById("skins-hint");
-    if (hint) {
-      hint.textContent = "Эмодзи и боулинг — свой цвет. Мячи и бильярд — фиксированная раскраска.";
-    }
     this.updateSkinColorPicker();
+    this.syncSkinPreview3d();
+    const selected = grid.querySelector(".skin-chip.selected");
+    selected?.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" });
   }
 
   private async selectSkin(skinId: string): Promise<void> {
@@ -826,7 +885,7 @@ export class MainMenu {
     }
     this.updateSkinPreview();
     this.renderSkins();
-    this.closeDrawer();
+    this.syncSkinPreview3d();
   }
 
   private async loadLeaderboard(period: "all" | "daily" = "all"): Promise<void> {

@@ -140,12 +140,28 @@
               </div>
 
               <div class="drawer-panel hidden" data-drawer-panel="skins">
-                <p id="skins-hint" class="drawer-desc">Эмодзи, мячи и шары — для части скинов можно выбрать цвет.</p>
-                <label id="skin-color-row" class="skin-color-row hidden" for="skin-color">
-                  <span class="field-label">Цвет сферы</span>
-                  <input id="skin-color" type="color" value="#ffffff" />
-                </label>
-                <div id="skin-grid" class="skin-grid"></div>
+                <div class="skins-studio">
+                  <div class="skins-preview-stage">
+                    <canvas id="skin-preview-canvas" aria-label="Превью скина в 3D"></canvas>
+                    <div class="skins-preview-meta">
+                      <p id="skins-preview-name" class="skins-preview-title">Классика</p>
+                      <p id="skins-hint" class="skins-preview-hint">Зажмите и тяните, чтобы повернуть</p>
+                    </div>
+                    <button
+                      type="button"
+                      id="btn-skin-reset-view"
+                      class="skins-reset-btn"
+                      title="По центру"
+                      aria-label="Сбросить вид"
+                    >⟳</button>
+                    <label id="skin-color-row" class="skins-color-fab hidden" for="skin-color" title="Цвет сферы">
+                      <span class="skins-color-swatch" aria-hidden="true"></span>
+                      <input id="skin-color" type="color" value="#ffffff" />
+                    </label>
+                  </div>
+                  <div id="skin-grid" class="skin-strip" role="listbox" aria-label="Список скинов"></div>
+                  <button id="btn-skins-done" type="button" class="btn btn-primary skins-done-btn">Готово</button>
+                </div>
               </div>
 
               <div class="drawer-panel hidden" data-drawer-panel="account">

@@ -30,38 +30,12 @@ export const SKIN_TINT_PALETTE: number[] = [
   0xff6b6b, 0x4ecdc4, 0xffe66d, 0x6c5ce7, 0xfd79a8,
 ];
 
-const EMOJI_SKINS: { id: string; name: string; emoji: string }[] = [
-  { id: "emoji_grin", name: "Улыбка", emoji: "😀" },
-  { id: "emoji_cool", name: "Крутой", emoji: "😎" },
-  { id: "emoji_lol", name: "Смех", emoji: "🤣" },
-  { id: "emoji_love", name: "Любовь", emoji: "😍" },
-  { id: "emoji_fire", name: "Огонь", emoji: "🔥" },
-  { id: "emoji_star", name: "Звезда", emoji: "⭐" },
-  { id: "emoji_skull", name: "Череп", emoji: "💀" },
-  { id: "emoji_ghost", name: "Призрак", emoji: "👻" },
-  { id: "emoji_cat", name: "Кот", emoji: "🐱" },
-  { id: "emoji_dog", name: "Собака", emoji: "🐶" },
-  { id: "emoji_alien", name: "Пришелец", emoji: "👽" },
-  { id: "emoji_robot", name: "Робот", emoji: "🤖" },
-  { id: "emoji_pizza", name: "Пицца", emoji: "🍕" },
-  { id: "emoji_earth", name: "Земля", emoji: "🌍" },
-  { id: "emoji_clown", name: "Клоун", emoji: "🤡" },
-  { id: "emoji_devil", name: "Дьявол", emoji: "😈" },
-];
-
-function emojiCatalog(): SkinDef[] {
-  return EMOJI_SKINS.map((e) => ({
-    id: e.id,
-    name: e.name,
-    kind: "emoji" as const,
-    emoji: e.emoji,
-    tintable: true,
-    defaultColor: 0xffffff,
-    free: true,
-  }));
-}
-
-const BALL_SKINS: SkinDef[] = [
+/**
+ * 10 проработанных скинов — мячи рисуем процедурно по нормали сферы,
+ * эмодзи кладём поверх PBR-подобного шара через Babylon CreateDecal.
+ */
+export const SKIN_CATALOG: SkinDef[] = [
+  // ─── Спортивные мячи ──────────────────────────────
   {
     id: "ball_football",
     name: "Футбол",
@@ -94,39 +68,62 @@ const BALL_SKINS: SkinDef[] = [
     defaultColor: 0x1a1a2e,
     free: true,
   },
-  ...[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].map((n) => ({
-    id: `ball_billiard_${n}`,
-    name: `Бильярд ${n}`,
-    kind: "billiard" as const,
-    billiardNumber: n,
+  {
+    id: "ball_8ball",
+    name: "Восьмёрка",
+    kind: "billiard",
+    billiardNumber: 8,
     tintable: false,
-    defaultColor: billiardColor(n),
+    defaultColor: 0x111111,
     free: true,
-  })),
+  },
+  // ─── Эмодзи‑шарики (PBR + decal) ─────────────────
+  {
+    id: "emoji_grin",
+    name: "Улыбка",
+    kind: "emoji",
+    emoji: "😀",
+    tintable: true,
+    defaultColor: 0xfcd53f,
+    free: true,
+  },
+  {
+    id: "emoji_cool",
+    name: "Крутой",
+    kind: "emoji",
+    emoji: "😎",
+    tintable: true,
+    defaultColor: 0xfcd53f,
+    free: true,
+  },
+  {
+    id: "emoji_fire",
+    name: "Огонь",
+    kind: "emoji",
+    emoji: "🔥",
+    tintable: true,
+    defaultColor: 0xff7b1c,
+    free: true,
+  },
+  {
+    id: "emoji_star",
+    name: "Звезда",
+    kind: "emoji",
+    emoji: "⭐",
+    tintable: true,
+    defaultColor: 0x2a2540,
+    free: true,
+  },
+  {
+    id: "emoji_alien",
+    name: "Пришелец",
+    kind: "emoji",
+    emoji: "👽",
+    tintable: true,
+    defaultColor: 0x6cc551,
+    free: true,
+  },
 ];
-
-function billiardColor(n: number): number {
-  const colors: Record<number, number> = {
-    1: 0xf4d03f,
-    2: 0x3498db,
-    3: 0xe74c3c,
-    4: 0x9b59b6,
-    5: 0xe67e22,
-    6: 0x2ecc71,
-    7: 0x7f3b1b,
-    8: 0x111111,
-    9: 0xffff00,
-    10: 0x1abc9c,
-    11: 0x8e44ad,
-    12: 0x2980b9,
-    13: 0xff69b4,
-    14: 0x006400,
-    15: 0x8b0000,
-  };
-  return colors[n] ?? 0xcccccc;
-}
-
-export const SKIN_CATALOG: SkinDef[] = [...emojiCatalog(), ...BALL_SKINS];
 
 export function getSkin(id: string): SkinDef | undefined {
   return SKIN_CATALOG.find((s) => s.id === id);

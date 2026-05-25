@@ -10,7 +10,7 @@ import {
   type Scene,
 } from "@babylonjs/core";
 import { GROUND_Y, PELLET_RADIUS } from "@spherio/shared";
-import { disposeSkinMaterials, getPlayerSkinMaterial } from "./skinTextures.js";
+import { attachSkinDecal, disposeSkinMaterials, getSphereBaseMaterial } from "./skinTextures.js";
 import { isLocalPart } from "../lib/playerParts.js";
 
 interface PlayerSnap {
@@ -59,6 +59,7 @@ const NAME_LABEL_HEIGHT = 0.85;
 
 export class EntitySync {
   private players = new Map<string, Mesh>();
+  private decals = new Map<string, Mesh>();
   private shadows = new Map<string, Mesh>();
   private labels = new Map<string, Mesh>();
   private labelTextures = new Map<string, DynamicTexture>();
@@ -111,12 +112,13 @@ export class EntitySync {
       if (!node) {
         node = MeshBuilder.CreateSphere(
           `player_${p.id}`,
-          { diameter: 1, segments: 24 },
+          { diameter: 1, segments: 32 },
           this.scene,
         );
         node.rotationQuaternion = Quaternion.Identity();
         node.material = this.playerMat(p.skinId, p.color);
         this.players.set(p.id, node);
+        this.applyDecal(p.id, node, p.skinId);
 
         shadow = MeshBuilder.CreateDisc(
           `shadow_${p.id}`,
@@ -190,8 +192,13 @@ export class EntitySync {
 
       const matKey = `${p.skinId}_${p.color & 0xffffff}`;
       if (this.playerMatKeys.get(p.id) !== matKey) {
+        const prevSkin = this.playerMatKeys.get(p.id)?.split("_")[0];
         node.material = this.playerMat(p.skinId, p.color);
         this.playerMatKeys.set(p.id, matKey);
+        if (prevSkin !== p.skinId) {
+          this.disposeDecal(p.id);
+          this.applyDecal(p.id, node, p.skinId);
+        }
       }
       const mat = node.material as StandardMaterial;
       mat.alpha = p.invulnUntil > now ? 0.55 + 0.2 * Math.sin(now * 0.01) : 1;
@@ -216,6 +223,7 @@ export class EntitySync {
 
     for (const [id, node] of this.players) {
       if (!seen.has(id)) {
+        this.disposeDecal(id);
         node.dispose();
         this.shadows.get(id)?.dispose();
         this.labels.get(id)?.dispose();
@@ -438,18 +446,33 @@ export class EntitySync {
   }
 
   private playerMat(skinId: string, color: number): StandardMaterial {
-    return getPlayerSkinMaterial(this.scene, skinId, color);
+    return getSphereBaseMaterial(this.scene, skinId, color);
+  }
+
+  private applyDecal(id: string, sphere: Mesh, skinId: string): void {
+    const decal = attachSkinDecal(this.scene, sphere, skinId);
+    if (decal) this.decals.set(id, decal);
+  }
+
+  private disposeDecal(id: string): void {
+    const d = this.decals.get(id);
+    if (d) {
+      d.dispose();
+      this.decals.delete(id);
+    }
   }
 
   dispose(): void {
+    for (const n of this.decals.values()) n.dispose();
     for (const n of this.players.values()) n.dispose();
     for (const n of this.shadows.values()) n.dispose();
     for (const n of this.labels.values()) n.dispose();
     for (const t of this.labelTextures.values()) t.dispose();
     for (const n of this.pellets.values()) n.dispose();
     this.shadowMat.dispose();
-    disposeSkinMaterials();
+    disposeSkinMaterials(this.scene);
     this.playerMatKeys.clear();
+    this.decals.clear();
     this.players.clear();
     this.shadows.clear();
     this.labels.clear();
