@@ -159,7 +159,27 @@ export class MainMenu {
     const btn = document.getElementById("btn-leave");
     btn?.addEventListener("click", openPause);
     btn?.addEventListener("pointerdown", (e) => e.stopPropagation());
-    window.addEventListener("sphere3d:leave-game", () => void this.leaveGame());
+    window.addEventListener("sphere3d:leave-game", (e: Event) => {
+      const detail = (e as CustomEvent<{ restartPublic?: boolean }>).detail;
+      if (detail?.restartPublic) {
+        void this.restartPublicMatch();
+      } else {
+        void this.leaveGame();
+      }
+    });
+  }
+
+  private async restartPublicMatch(): Promise<void> {
+    // Завершаем текущий матч и сразу запускаем новый публичный.
+    await this.leaveGame();
+    await this.startGame(async () =>
+      joinPublicArena({
+        name: this.getNick(),
+        skinId: this.skinId,
+        skinColor: this.joinSkinColor(),
+        token: this.auth?.token,
+      }),
+    );
   }
 
   private openPauseMenu(): void {

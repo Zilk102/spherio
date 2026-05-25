@@ -34,7 +34,7 @@ export interface JoinOptions {
   reconnectionToken?: string;
 }
 
-/** Сервер → клиент: итоги матча */
+/** Сервер → клиент: итоги сессии игрока (при выходе/disconnect) */
 export interface MatchEndMessage {
   score: number;
   kills: number;
@@ -42,4 +42,29 @@ export interface MatchEndMessage {
   timeSec: number;
   rank: number;
   players: number;
+}
+
+/** Одна строчка финального лидерборда матча. */
+export interface MatchLeaderboardRow {
+  id: string;
+  name: string;
+  score: number;
+  radius: number;
+  isBot: boolean;
+  /** sessionId Colyseus у клиента, чтобы выделить «себя» */
+  sessionId?: string;
+}
+
+/** Сервер → клиент (broadcast): матч закончился по таймеру, показываем лидерборд. */
+export interface MatchResultsMessage {
+  reason: "timeup";
+  /** Длительность матча в секундах. */
+  durationSec: number;
+  /** Через сколько мс комната будет уничтожена (для авто-возврата в меню). */
+  holdMs: number;
+  /** Можно ли по результатам начать новую публичную сессию (false для приватных). */
+  canRestartPublic: boolean;
+  rows: MatchLeaderboardRow[];
+  /** Был ли этот матч приватным (счёт не пишется в глобальный топ). */
+  isPrivate: boolean;
 }

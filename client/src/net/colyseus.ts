@@ -1,7 +1,17 @@
 import { Client, Room } from "colyseus.js";
+import { MATCH_REUSE_MIN_REMAINING_MS } from "@spherio/shared";
 import type { JoinOptions } from "@spherio/shared";
 
 const RECONNECT_KEY = "sphere3d_reconnect";
+
+interface ArenaRoomMeta {
+  private?: boolean;
+  matchEndsAt?: number;
+  matchStartedAt?: number;
+  matchPhase?: string;
+  humanCount?: number;
+  maxClients?: number;
+}
 
 function endpoint(): string {
   const env = import.meta.env.VITE_COLYSEUS_ENDPOINT as string | undefined;
@@ -43,7 +53,44 @@ export async function tryReconnect(): Promise<Room | null> {
 
 export async function joinPublicArena(opts: JoinOptions): Promise<Room> {
   const c = getClient();
-  const room = await c.joinOrCreate("arena", opts);
+  // Сначала ищем существующее публичное лобби, в котором:
+  //  - есть свободное место (clients < maxClients);
+  //  - матч ещё активен и до конца более MATCH_REUSE_MIN_REMAINING_MS.
+  try {
+    const rooms = await c.getAvailableRooms("arena");
+    const now = Date.now();
+    const candidates = rooms
+      .filter((r) => {
+        if (r.clients >= r.maxClients) return false;
+        const meta = (r.metadata ?? {}) as ArenaRoomMeta;
+        if (meta.private) return false;
+        if (meta.matchPhase && meta.matchPhase !== "running") return false;
+        const endsAt = meta.matchEndsAt ?? 0;
+        if (!endsAt) return false;
+        return endsAt - now >= MATCH_REUSE_MIN_REMAINING_MS;
+      })
+      .sort((a, b) => {
+        // Выбираем самую населённую из подходящих — лучше попасть в живую сессию.
+        if (b.clients !== a.clients) return b.clients - a.clients;
+        const ae = ((a.metadata ?? {}) as ArenaRoomMeta).matchEndsAt ?? 0;
+        const be = ((b.metadata ?? {}) as ArenaRoomMeta).matchEndsAt ?? 0;
+        return be - ae;
+      });
+    if (candidates.length > 0) {
+      try {
+        const room = await c.joinById(candidates[0].roomId, opts);
+        saveReconnectToken(room);
+        return room;
+      } catch (err) {
+        console.warn("[matchmake] joinById не сработал, fallback", err);
+      }
+    }
+  } catch (err) {
+    console.warn("[matchmake] getAvailableRooms не сработал", err);
+  }
+
+  // Иначе — создаём новую публичную комнату.
+  const room = await c.create("arena", opts);
   saveReconnectToken(room);
   return room;
 }

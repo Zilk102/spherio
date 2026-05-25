@@ -2,6 +2,8 @@ import { Client, Room } from "@colyseus/core";
 import {
   ARENA_HALF,
   BOT_COUNT,
+  MATCH_DURATION_MS,
+  MATCH_END_HOLD_MS,
   MIN_RADIUS,
   PLAYER_COLORS,
   TICK_DT,
@@ -10,7 +12,14 @@ import {
   randomBotAppearance,
   scoreFromRadius,
 } from "@spherio/shared";
-import type { ChatMessage, InputMessage, JoinOptions, MatchEndMessage } from "@spherio/shared";
+import type {
+  ChatMessage,
+  InputMessage,
+  JoinOptions,
+  MatchEndMessage,
+  MatchLeaderboardRow,
+  MatchResultsMessage,
+} from "@spherio/shared";
 import { getGuest, verifyToken } from "../services/auth.js";
 import { pool } from "../db/pool.js";
 import { filterChatText } from "../services/chatFilter.js";
@@ -22,6 +31,7 @@ import { PhysicsWorld } from "../game/PhysicsWorld.js";
 import { PelletManager } from "../game/PelletManager.js";
 import { EatResolver } from "../game/EatResolver.js";
 import { BotAI } from "../game/BotAI.js";
+import { TargetSystem } from "../game/TargetSystem.js";
 import { randomBotName } from "../game/botNames.js";
 import { PelletManager as PelletUtil } from "../game/PelletManager.js";
 import { InputRateLimiter } from "../game/rateLimit.js";
@@ -53,6 +63,8 @@ const RECONNECT_SEC = 30;
 export class ArenaRoom extends Room<ArenaState> {
   maxClients = 50;
   protected enableBots = true;
+  /** Override в PrivateArenaRoom. Управляет логикой матчмейкинга и leaderboard'а. */
+  protected isPrivateRoom = false;
 
   private physics!: PhysicsWorld;
   private pellets = new PelletManager();
@@ -62,12 +74,19 @@ export class ArenaRoom extends Room<ArenaState> {
   private invuln = new Map<string, number>();
   private botIds: string[] = [];
   private botAI = new BotAI();
+  private targetSystem = new TargetSystem();
   private botNamesUsed = new Set<string>();
   private sessionParts = new Map<string, string[]>();
   private sessionStats = new Map<string, SessionStats>();
+  /** true пока матч ещё не закончился по таймеру — в нём принимаются input и физика. */
+  protected matchActive = true;
+  /** sessionId-набор клиентов, которые уже получили per-player match_end (чтобы не отправлять дважды). */
+  private endedSessions = new Set<string>();
+  private matchEndScheduled = false;
 
   async onCreate(): Promise<void> {
     this.setState(new ArenaState());
+    this.state.isPrivate = this.isPrivateRoom;
 
     this.physics = new PhysicsWorld();
     await this.physics.init();
@@ -81,9 +100,15 @@ export class ArenaRoom extends Room<ArenaState> {
       for (let i = 0; i < BOT_COUNT; i++) {
         this.spawnBot(i);
       }
+      // У ботов первичные цели выдадим после спавна всех — чтобы было из чего выбирать.
+      const now = Date.now();
+      for (const botId of this.botIds) {
+        this.targetSystem.assignTargetFor(botId, this.state, now, this.invuln);
+      }
     }
 
     this.onMessage("input", (client, msg: InputMessage) => {
+      if (!this.matchActive) return;
       if (!this.rateLimiter.allow(client.sessionId)) return;
       const clean = sanitizeInput(msg);
       if (!clean) return;
@@ -124,7 +149,16 @@ export class ArenaRoom extends Room<ArenaState> {
 
     this.setPatchRate(1000 / 30);
     this.setSimulationInterval((dt) => this.tick(dt), 1000 / TICK_RATE);
-    console.log("[ArenaRoom] Создана арена");
+
+    // Публичная комната сразу стартует 15-минутный матч; приватная — после 2-го реального игрока.
+    if (!this.isPrivateRoom) {
+      this.startMatchTimer();
+    }
+    this.refreshMetadata();
+
+    console.log(
+      `[ArenaRoom] Создана арена (private=${this.isPrivateRoom}, bots=${this.enableBots})`,
+    );
   }
 
   async onJoin(client: Client, options: JoinOptions): Promise<void> {
@@ -133,6 +167,10 @@ export class ArenaRoom extends Room<ArenaState> {
     if (existing && existing.length > 0) {
       console.log(`[ArenaRoom] Реконнект ${sessionId}`);
       return;
+    }
+
+    if (!this.matchActive) {
+      throw new Error("Матч уже закончился");
     }
 
     const verified = options.token ? verifyToken(options.token) : null;
@@ -170,12 +208,20 @@ export class ArenaRoom extends Room<ArenaState> {
       name,
     };
     console.log(`[ArenaRoom] ${name} вошёл`);
+
+    // Выдадим этому игроку случайную цель и подтянем тех, у кого цели нет.
+    this.targetSystem.onPlayerSpawned(playerId, this.state, Date.now(), this.invuln);
+
+    this.onHumanJoined();
+    this.refreshMetadata();
   }
 
   async onLeave(client: Client, consented?: boolean): Promise<void> {
     const sessionId = client.sessionId;
     if (consented) {
       this.finalizeSession(client, false);
+      this.onHumanLeft();
+      this.refreshMetadata();
       return;
     }
     try {
@@ -183,13 +229,145 @@ export class ArenaRoom extends Room<ArenaState> {
       console.log(`[ArenaRoom] Ожидание реконнекта ${sessionId}`);
     } catch {
       this.finalizeSession(client, true);
+      this.onHumanLeft();
+      this.refreshMetadata();
     }
+  }
+
+  /** Хук — переопределяется в PrivateArenaRoom для запуска отложенного таймера. */
+  protected onHumanJoined(): void {
+    /* no-op в public */
+  }
+
+  /** Хук — переопределяется в PrivateArenaRoom для idle-grace. */
+  protected onHumanLeft(): void {
+    /* no-op в public */
+  }
+
+  /** Запустить серверный таймер матча 15 минут с текущего момента. */
+  protected startMatchTimer(): void {
+    if (this.state.matchEndsAt > 0) return;
+    const now = Date.now();
+    this.state.matchStartedAt = now;
+    this.state.matchEndsAt = now + MATCH_DURATION_MS;
+    this.state.matchPhase = "running";
+    this.refreshMetadata();
+    console.log(
+      `[ArenaRoom] Матч стартовал, до конца ${(MATCH_DURATION_MS / 60000).toFixed(0)} мин (private=${this.isPrivateRoom})`,
+    );
+  }
+
+  /** Текущее число «живых» (не-бот) сессий в комнате (с учётом потерянных, но в reconnect-окне). */
+  protected humanCount(): number {
+    let n = 0;
+    for (const ps of this.state.players.values()) {
+      if (!ps.isBot) n++;
+    }
+    return n;
+  }
+
+  /** Пишет актуальные данные в Colyseus metadata — клиент-матчмейкер опирается на них. */
+  protected refreshMetadata(): void {
+    const meta = (this.metadata ?? {}) as Record<string, unknown>;
+    this.setMetadata({
+      ...meta,
+      private: this.isPrivateRoom,
+      matchEndsAt: this.state.matchEndsAt,
+      matchStartedAt: this.state.matchStartedAt,
+      matchPhase: this.state.matchPhase,
+      humanCount: this.humanCount(),
+      maxClients: this.maxClients,
+    });
+  }
+
+  /** Завершить матч по таймеру: разослать лидерборд, заморозить input, через MATCH_END_HOLD_MS dispose. */
+  protected finishMatchByTimer(): void {
+    if (!this.matchActive || this.matchEndScheduled) return;
+    this.matchActive = false;
+    this.matchEndScheduled = true;
+    this.state.matchPhase = "ended";
+    this.refreshMetadata();
+
+    const rows = this.buildLeaderboard();
+    const durationSec = Math.max(
+      1,
+      Math.floor((Date.now() - (this.state.matchStartedAt || Date.now())) / 1000),
+    );
+
+    // Финализируем сессии оставшихся реальных игроков (пишем stats/leaderboard в БД).
+    for (const client of this.clients) {
+      try {
+        this.finalizeSession(client, false);
+      } catch (err) {
+        console.warn("[ArenaRoom] finalize fail", err);
+      }
+    }
+
+    // Заморозим ботов и физику игроков.
+    for (const p of this.physics.getAllPlayers()) {
+      p.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      p.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    }
+
+    const payload: MatchResultsMessage = {
+      reason: "timeup",
+      durationSec,
+      holdMs: MATCH_END_HOLD_MS,
+      canRestartPublic: !this.isPrivateRoom,
+      rows,
+      isPrivate: this.isPrivateRoom,
+    };
+
+    // Каждому клиенту шлём персональный sessionId — чтобы клиент мог подсветить «себя».
+    for (const client of this.clients) {
+      try {
+        client.send("match_results", {
+          ...payload,
+          rows: rows.map((r) => ({ ...r, sessionId: r.sessionId })),
+          you: client.sessionId,
+        });
+      } catch {
+        /* клиент отключился */
+      }
+    }
+
+    console.log(
+      `[ArenaRoom] match_results разослан (${rows.length} строк), dispose через ${MATCH_END_HOLD_MS}мс`,
+    );
+
+    this.clock.setTimeout(() => {
+      this.disconnect().catch(() => undefined);
+    }, MATCH_END_HOLD_MS);
+  }
+
+  /** Собрать топ всех игроков (включая ботов) по radius. */
+  protected buildLeaderboard(): MatchLeaderboardRow[] {
+    const items: MatchLeaderboardRow[] = [];
+    // sessionId → playerId, чтобы маркировать «себя» на клиенте
+    const sidByPlayer = new Map<string, string>();
+    for (const [sid, parts] of this.sessionParts) {
+      for (const partId of parts) sidByPlayer.set(partId, sid);
+    }
+    for (const [id, ps] of this.state.players) {
+      items.push({
+        id,
+        name: ps.name || (ps.isBot ? "Бот" : "Игрок"),
+        score: scoreFromRadius(ps.radius),
+        radius: ps.radius,
+        isBot: !!ps.isBot,
+        sessionId: sidByPlayer.get(id),
+      });
+    }
+    items.sort((a, b) => b.score - a.score);
+    return items;
   }
 
   /** @param sendMatchEnd — false при добровольном выходе «В меню» (без модалки итогов) */
   private finalizeSession(client: Client, sendMatchEnd = true): void {
-    const meta = (client as Client & { meta?: SessionMeta }).meta;
     const sessionId = client.sessionId;
+    if (this.endedSessions.has(sessionId)) return;
+    this.endedSessions.add(sessionId);
+    const meta = (client as Client & { meta?: SessionMeta }).meta;
     const stats = this.sessionStats.get(sessionId);
     const parts = this.sessionParts.get(sessionId) ?? (meta?.playerId ? [meta.playerId] : []);
 
@@ -213,13 +391,16 @@ export class ArenaRoom extends Room<ArenaState> {
         const humanCount = [...this.state.players.values()].filter((p) => !p.isBot).length;
         const rank = this.estimateRank(bestR);
 
-        void submitScore(meta.userId, meta.name, bestR);
-        void recordMatchEnd(meta.userId, meta.guest, {
-          kills: st.kills,
-          deaths: st.deaths,
-          bestRadius: bestR,
-          timeSec,
-        });
+        // Глобальный топ/ежедневный/долгосрочные user_stats пишем ТОЛЬКО из публичных матчей.
+        if (!this.isPrivateRoom) {
+          void submitScore(meta.userId, meta.name, bestR);
+          void recordMatchEnd(meta.userId, meta.guest, {
+            kills: st.kills,
+            deaths: st.deaths,
+            bestRadius: bestR,
+            timeSec,
+          });
+        }
 
         if (sendMatchEnd) {
           try {
@@ -299,16 +480,46 @@ export class ArenaRoom extends Room<ArenaState> {
     ps.isBot = true;
     this.state.players.set(id, ps);
     this.botIds.push(id);
+    this.botAI.registerBot(id, index);
   }
 
   private tick(dtMs: number): void {
     const dt = Math.min(dtMs / 1000, TICK_DT * 2);
+    const nowMs = Date.now();
 
+    // Серверный таймер матча.
+    if (this.matchActive && this.state.matchEndsAt > 0 && nowMs >= this.state.matchEndsAt) {
+      this.finishMatchByTimer();
+      return;
+    }
+
+    if (!this.matchActive) {
+      // После окончания: просто слегка обновляем позиции (затухание), без AI/еды.
+      this.physics.step(dt);
+      this.syncPlayers(nowMs);
+      return;
+    }
+
+    const getTargetForBot = (botId: string): { id: string; radius: number } | null => {
+      const ps = this.state.players.get(botId);
+      if (!ps || !ps.targetId) return null;
+      const tps = this.state.players.get(ps.targetId);
+      if (!tps) return null;
+      return { id: tps.id, radius: tps.radius };
+    };
     for (const botId of this.botIds) {
       if (!this.state.players.has(botId)) continue;
       this.physics.setInput(
         botId,
-        this.botAI.decide(botId, this.physics, this.pelletData, Date.now(), this.invuln, dt),
+        this.botAI.decide(
+          botId,
+          this.physics,
+          this.pelletData,
+          Date.now(),
+          this.invuln,
+          dt,
+          getTargetForBot,
+        ),
       );
     }
 
@@ -316,7 +527,7 @@ export class ArenaRoom extends Room<ArenaState> {
     applyBoostMassDrain(this.physics, this.sessionParts, dt);
     this.nudgeStuckBots();
     enforceSpeedLimits(this.physics.getAllPlayers());
-    const now = Date.now();
+    const now = nowMs;
     const events = this.eatResolver.resolve(
       this.physics,
       this.state,
@@ -346,6 +557,15 @@ export class ArenaRoom extends Room<ArenaState> {
       );
       pushKillFeed(this.state, e.killerName, e.victimName, now);
 
+      // Цели: убитого как цель убрать у всех, у кого она стояла; убийце — новую цель.
+      this.targetSystem.onPlayerEaten(
+        e.eaterId,
+        e.victimId,
+        this.state,
+        now,
+        this.invuln,
+      );
+
       const killerSession = this.findSessionByPart(e.eaterId);
       const victimSession = this.findSessionByPart(e.victimOwnerId);
       if (killerSession) {
@@ -354,12 +574,33 @@ export class ArenaRoom extends Room<ArenaState> {
           st.kills += 1;
           st.bestRadius = Math.max(st.bestRadius, e.newRadius);
         }
+        // Уведомим клиента о бонусе — пусть отрисует «toast» x3.
+        if (e.wasTargetKill) {
+          try {
+            this.clients
+              .find((c) => c.sessionId === killerSession)
+              ?.send("target_bonus", {
+                victimName: e.victimName,
+                mult: 3,
+              });
+          } catch {
+            /* клиент мог отвалиться */
+          }
+        }
       }
       if (victimSession) {
         const st = this.sessionStats.get(victimSession);
         if (st) st.deaths += 1;
       }
     }
+
+    // Респавн жертв создаёт новые playerId — выдадим им цели и обновим тех, чей target пропал.
+    for (const r of events.respawns) {
+      this.targetSystem.onPlayerSpawned(r.playerId, this.state, now, this.invuln);
+    }
+
+    // Периодически перевыбираем устаревшие цели у всех живых.
+    this.targetSystem.tick(this.state, now, this.invuln);
 
     this.syncPlayers(now);
     if (events.pelletEaten.length > 0 || events.playerEaten.length > 0) {

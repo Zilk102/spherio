@@ -1364,27 +1364,298 @@ body.in-game--touch .hud-leave {
   border-radius: var(--radius);
   border: 1px solid var(--border-strong);
   background: var(--bg-card);
-  min-width: 260px;
+  min-width: 320px;
+  max-width: 420px;
+  width: min(420px, 92vw);
 }
 
 .match-end-title {
   font-family: var(--font-display);
-  font-size: 1.1rem;
+  font-size: 1.3rem;
+  color: var(--text);
+  margin-bottom: 4px;
+  letter-spacing: 0.02em;
+}
+
+.match-end-subtitle {
+  font-size: 0.85rem;
   color: var(--text-muted);
-  margin-bottom: 8px;
+  margin: 0 0 14px;
 }
 
 .match-end-score {
   font-family: var(--font-display);
-  font-size: 2.4rem;
+  font-size: 2.6rem;
   font-weight: 800;
   color: var(--accent);
+  margin: 0;
+  line-height: 1;
 }
 
 .match-end-detail {
-  margin: 12px 0 18px;
+  margin: 8px 0 16px;
   font-size: 0.85rem;
   color: var(--text-muted);
+}
+
+.match-end-rows {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 18px;
+  max-height: 280px;
+  overflow-y: auto;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.match-end-row {
+  display: grid;
+  grid-template-columns: 38px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  font-size: 0.88rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.match-end-row:last-child {
+  border-bottom: none;
+}
+
+.match-end-row.is-me {
+  background: rgba(255, 200, 50, 0.12);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.match-end-row.is-bot {
+  color: var(--text-muted);
+}
+
+.match-end-row em {
+  font-style: normal;
+  font-size: 0.7rem;
+  opacity: 0.6;
+  margin-left: 4px;
+}
+
+.match-end-row-rank {
+  font-family: var(--font-display);
+  font-weight: 700;
+  color: var(--accent);
+  text-align: left;
+}
+
+.match-end-row-name {
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.match-end-row-score {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.match-end-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.match-end-hint {
+  margin: 14px 0 0;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  opacity: 0.8;
+}
+
+/* HUD: строка «Цель» */
+.hud-target {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  background: rgba(40, 8, 8, 0.42);
+  border: 1px solid rgba(255, 80, 80, 0.45);
+  color: #ffd2cf;
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-target.hidden {
+  display: none;
+}
+
+.hud-target-icon {
+  color: #ff5a5a;
+  font-weight: 700;
+  letter-spacing: -2px;
+}
+
+.hud-target-name {
+  font-weight: 700;
+  color: #fff;
+}
+
+.hud-target-sep {
+  opacity: 0.5;
+  margin: 0 2px;
+}
+
+.hud-target-timer {
+  font-weight: 700;
+  color: #ffe3a8;
+}
+
+.hud-target--ready {
+  border-color: rgba(120, 220, 110, 0.6);
+  background: rgba(10, 40, 12, 0.45);
+  color: #d6f5d4;
+}
+
+.hud-target--ready .hud-target-icon {
+  color: #5bd773;
+}
+
+.hud-target--ready .hud-target-state {
+  color: #b9f0b6;
+  font-weight: 700;
+}
+
+.hud-target--danger {
+  border-color: rgba(255, 70, 70, 0.7);
+  background: rgba(60, 10, 10, 0.55);
+  color: #ffb4ad;
+}
+
+.hud-target--danger .hud-target-state {
+  color: #ff8273;
+}
+
+.hud-target--grow {
+  border-color: rgba(255, 200, 80, 0.55);
+  background: rgba(50, 32, 8, 0.45);
+  color: #ffe1a0;
+}
+
+.hud-target--grow .hud-target-state {
+  color: #ffd76a;
+}
+
+.hud-target--wait {
+  opacity: 0.7;
+}
+
+.hud-target--urgent .hud-target-timer {
+  color: #ff8273;
+  animation: hud-timer-pulse 700ms ease-in-out infinite alternate;
+}
+
+/* Toast «×3 Цель поглощена!» */
+.target-bonus-toast {
+  position: fixed;
+  top: 12%;
+  left: 50%;
+  transform: translateX(-50%) translateY(-20px) scale(0.92);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 24px;
+  border-radius: 14px;
+  background: linear-gradient(140deg, rgba(60, 16, 18, 0.96), rgba(120, 30, 22, 0.94));
+  border: 1px solid rgba(255, 200, 130, 0.5);
+  box-shadow: 0 18px 40px rgba(180, 50, 30, 0.45);
+  color: #fff8e6;
+  font-family: var(--font-display);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 220ms ease, transform 280ms cubic-bezier(0.2, 0.9, 0.2, 1.2);
+  z-index: 60;
+}
+
+.target-bonus-toast.hidden {
+  display: none;
+}
+
+.target-bonus-toast--show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0) scale(1);
+}
+
+.target-bonus-mult {
+  font-size: 2rem;
+  font-weight: 900;
+  color: #ffd66b;
+  text-shadow: 0 0 18px rgba(255, 196, 80, 0.6);
+}
+
+.target-bonus-label {
+  font-size: 0.9rem;
+  letter-spacing: 0.02em;
+}
+
+/* HUD таймер матча */
+.hud-timer {
+  position: fixed;
+  top: max(12px, env(safe-area-inset-top, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 16px;
+  border-radius: 999px;
+  background: rgba(2, 6, 12, 0.72);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+  z-index: 15;
+  transition: color 200ms ease, border-color 200ms ease, background 200ms ease;
+}
+
+.hud-timer-label {
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.hud-timer-value {
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.hud-timer--urgent {
+  border-color: rgba(231, 76, 60, 0.7);
+  background: rgba(60, 10, 10, 0.7);
+}
+
+.hud-timer--urgent .hud-timer-value {
+  color: #ff8273;
+  animation: hud-timer-pulse 800ms ease-in-out infinite alternate;
+}
+
+.hud-timer--waiting .hud-timer-value {
+  color: var(--text-muted);
+}
+
+.hud-timer--ended {
+  border-color: rgba(255, 200, 50, 0.6);
+}
+
+@keyframes hud-timer-pulse {
+  from { opacity: 0.7; }
+  to   { opacity: 1.0; }
 }
 
 /* ─── Game UI: killfeed, death, chat ─── */

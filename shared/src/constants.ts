@@ -58,3 +58,19 @@ export const PLAYER_COLORS = [
   0xe74c3c, 0x3498db, 0x2ecc71, 0xf39c12, 0x9b59b6,
   0x1abc9c, 0xe91e63, 0x00bcd4, 0xff5722, 0x8bc34a,
 ];
+
+/** Лайфтайм одного матча (публичного и приватного со старта). */
+export const MATCH_DURATION_MS = 15 * 60 * 1000;
+/** Сколько держим overlay с итогами после `match_results` до dispose комнаты. */
+export const MATCH_END_HOLD_MS = 14 * 1000;
+/** Сколько времени до окончания матча допускает «дотолкнуть» нового игрока в существующее публичное лобби. */
+export const MATCH_REUSE_MIN_REMAINING_MS = 8 * 60 * 1000;
+/** Приватное лобби живёт максимум столько без реальных игроков, потом dispose. */
+export const PRIVATE_IDLE_GRACE_MS = 5 * 60 * 1000;
+/** Минимум реальных игроков для старта таймера в приватном лобби. */
+export const PRIVATE_MIN_HUMANS_TO_START = 2;
+
+/** Сколько живёт «случайная цель» у игрока/бота — потом перевыбирается. */
+export const TARGET_DURATION_MS = 60 * 1000;
+/** Множитель массы (и соответственно очков), получаемой при поедании именно своей цели. */
+export const TARGET_BONUS_MULT = 3;

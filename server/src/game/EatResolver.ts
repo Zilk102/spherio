@@ -6,6 +6,7 @@ import {
   MIN_RADIUS,
   PELLET_RADIUS,
   RESPAWN_INVULN_MS,
+  TARGET_BONUS_MULT,
 } from "@spherio/shared";
 import { massFromRadius } from "@spherio/shared";
 import type { PhysicsWorld } from "./PhysicsWorld.js";
@@ -26,6 +27,8 @@ export interface EatEvents {
     victimRadius: number;
     scatterMass: number;
     removedPartOnly: boolean;
+    /** true, если убитый был активной целью eater'а — пришёл бонус x3. */
+    wasTargetKill: boolean;
   }[];
   respawns: { playerId: string; ownerId: string; x: number; z: number }[];
 }
@@ -91,7 +94,18 @@ export class EatResolver {
         if (dist < eater.radius + victim.radius * 0.85) {
           const victimMass = massFromRadius(victim.radius);
           const scatterMass = victimMass * DEATH_SCATTER_FRACTION;
-          const absorbMass = victimMass * KILL_ABSORB_FRACTION;
+
+          const killerPs = state.players.get(eater.id);
+          const victimPs = state.players.get(victim.id);
+          const wasTargetKill = !!(
+            killerPs &&
+            killerPs.targetId &&
+            killerPs.targetId === victim.id
+          );
+
+          // Если жертва была активной целью — поглощаем x3 от обычной доли (массу + соответственно очки).
+          const absorbMul = wasTargetKill ? TARGET_BONUS_MULT : 1;
+          const absorbMass = victimMass * KILL_ABSORB_FRACTION * absorbMul;
           const newRadius = PelletManager.applyMassGain(
             eater.radius,
             absorbMass,
@@ -102,8 +116,6 @@ export class EatResolver {
           const partList = parts ?? [victim.id];
           const removedPartOnly = partList.length > 1;
 
-          const killerPs = state.players.get(eater.id);
-          const victimPs = state.players.get(victim.id);
           const victimName = victimPs?.name ?? victim.id;
           const victimColor = victimPs?.color ?? 0xffffff;
           const victimSkin = victimPs?.skinId ?? "emoji_grin";
@@ -121,6 +133,7 @@ export class EatResolver {
             victimRadius: victim.radius,
             scatterMass,
             removedPartOnly,
+            wasTargetKill,
           });
 
           physics.setRadius(eater.id, newRadius);

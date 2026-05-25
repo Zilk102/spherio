@@ -7,6 +7,8 @@ import {
   MeshBuilder,
   Quaternion,
   StandardMaterial,
+  TransformNode,
+  Vector3,
   type Scene,
 } from "@babylonjs/core";
 import { GROUND_Y, PELLET_RADIUS } from "@spherio/shared";
@@ -66,6 +68,8 @@ export class EntitySync {
   private pellets = new Map<string, Mesh>();
   private playerMatKeys = new Map<string, string>();
   private shadowMat: StandardMaterial;
+  private targetIndicator: TransformNode | null = null;
+  private targetIndicatorMat: StandardMaterial | null = null;
   private smooth = new Map<string, SmoothState>();
   private history = new Map<
     string,
@@ -91,6 +95,100 @@ export class EntitySync {
     this.shadowMat.disableDepthWrite = true;
     this.shadowMat.transparencyMode = Material.MATERIAL_ALPHABLEND;
     this.shadowMat.zOffset = -8;
+  }
+
+  /**
+   * Создать (лениво) или обновить 3D-индикатор цели над сферой-жертвой.
+   * Если targetId не задан, нет такой сферы или это сам игрок — индикатор скрывается.
+   */
+  updateTargetIndicator(
+    targetId: string | null,
+    nowMs: number,
+    selfId: string | null,
+  ): void {
+    if (!this.targetIndicator) {
+      this.targetIndicator = this.buildTargetIndicator();
+    }
+    if (!targetId || targetId === selfId) {
+      this.targetIndicator.setEnabled(false);
+      return;
+    }
+    const mesh = this.players.get(targetId);
+    const smooth = this.smooth.get(targetId);
+    if (!mesh || !smooth) {
+      this.targetIndicator.setEnabled(false);
+      return;
+    }
+    const r = smooth.radius;
+    // Парим над сферой, лёгкое колыхание по Y чтобы привлекать внимание.
+    const bob = Math.sin(nowMs * 0.004) * 0.18;
+    const above = r + 1.4 + bob;
+    this.targetIndicator.position.set(smooth.x, smooth.y + above, smooth.z);
+    // Вращение вокруг вертикальной оси — 1 оборот за ~2.5 секунды.
+    this.targetIndicator.rotation.y = (nowMs / 1000) * (Math.PI * 0.8);
+    this.targetIndicator.setEnabled(true);
+  }
+
+  /** Построить меш: круглая «шапочка» с пиками-стрелками по 4 сторонам, направленными вниз. */
+  private buildTargetIndicator(): TransformNode {
+    const root = new TransformNode("targetIndicator", this.scene);
+    const mat = new StandardMaterial("targetIndicatorMat", this.scene);
+    mat.diffuseColor = new Color3(0.95, 0.18, 0.18);
+    mat.emissiveColor = new Color3(0.9, 0.12, 0.12);
+    mat.specularColor = new Color3(0.4, 0.1, 0.1);
+    mat.specularPower = 32;
+    mat.alpha = 0.95;
+    mat.transparencyMode = Material.MATERIAL_ALPHABLEND;
+    mat.backFaceCulling = false;
+    this.targetIndicatorMat = mat;
+
+    // Главная стрелка — острый конус, направленный вниз.
+    const cone = MeshBuilder.CreateCylinder(
+      "targetArrowCone",
+      {
+        diameterTop: 0,
+        diameterBottom: 1.05,
+        height: 1.55,
+        tessellation: 24,
+      },
+      this.scene,
+    );
+    cone.material = mat;
+    cone.parent = root;
+    cone.rotation.x = Math.PI; // острым концом вниз
+    cone.position.y = 0.0;
+
+    // Шток сверху, чтобы стрелка читалась как 3D-указатель.
+    const shaft = MeshBuilder.CreateCylinder(
+      "targetArrowShaft",
+      {
+        diameter: 0.32,
+        height: 0.7,
+        tessellation: 18,
+      },
+      this.scene,
+    );
+    shaft.material = mat;
+    shaft.parent = root;
+    shaft.position.y = 1.1;
+
+    // Кольцо-нимб вокруг штока — даёт нарядный «прицельный» вид.
+    const halo = MeshBuilder.CreateTorus(
+      "targetArrowHalo",
+      {
+        diameter: 1.55,
+        thickness: 0.12,
+        tessellation: 32,
+      },
+      this.scene,
+    );
+    halo.material = mat;
+    halo.parent = root;
+    halo.position.y = 1.05;
+
+    root.scaling = new Vector3(0.9, 0.9, 0.9);
+    root.setEnabled(false);
+    return root;
   }
 
   syncPlayers(
@@ -470,6 +568,10 @@ export class EntitySync {
     for (const t of this.labelTextures.values()) t.dispose();
     for (const n of this.pellets.values()) n.dispose();
     this.shadowMat.dispose();
+    this.targetIndicator?.dispose();
+    this.targetIndicatorMat?.dispose();
+    this.targetIndicator = null;
+    this.targetIndicatorMat = null;
     disposeSkinMaterials(this.scene);
     this.playerMatKeys.clear();
     this.decals.clear();

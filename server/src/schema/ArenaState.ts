@@ -17,6 +17,10 @@ export class PlayerState extends Schema {
   @type("string") skinId = "emoji_grin";
   @type("number") invulnUntil = 0;
   @type("boolean") isBot = false;
+  /** id текущей «цели» (другого игрока/бота). "" — нет цели. */
+  @type("string") targetId = "";
+  /** Серверное время, когда цель «протухнет» и будет перевыбрана. */
+  @type("number") targetExpiresAt = 0;
 }
 
 export class PelletState extends Schema {
@@ -36,4 +40,12 @@ export class ArenaState extends Schema {
   @type({ map: PlayerState }) players = new MapSchema<PlayerState>();
   @type([PelletState]) pellets = new ArraySchema<PelletState>();
   @type([KillFeedEntryState]) killFeed = new ArraySchema<KillFeedEntryState>();
+  /** Серверное время старта матча (ms epoch). 0 — не запущен. */
+  @type("number") matchStartedAt = 0;
+  /** Серверное время окончания матча (ms epoch). 0 — не запланирован. */
+  @type("number") matchEndsAt = 0;
+  /** "waiting" — ждём 2+ человек (private), "running" — матч идёт, "ended" — финал. */
+  @type("string") matchPhase = "waiting";
+  /** True если эта комната приватная (по коду). Клиент не пишет очки в глобальный топ. */
+  @type("boolean") isPrivate = false;
 }

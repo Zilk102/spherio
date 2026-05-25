@@ -257,6 +257,20 @@
         <div class="hud-card hud-card--player">
           <div id="hud-name" class="hud-name"></div>
           <div id="hud-stats" class="hud-stats"></div>
+          <div id="hud-target" class="hud-target hidden">
+            <span class="hud-target-icon" aria-hidden="true">◢◣</span>
+            <span class="hud-target-text">
+              Цель: <span id="hud-target-name" class="hud-target-name">—</span>
+              <span class="hud-target-sep">·</span>
+              <span id="hud-target-timer" class="hud-target-timer">0:00</span>
+              <span class="hud-target-sep">·</span>
+              <span id="hud-target-state" class="hud-target-state"></span>
+            </span>
+          </div>
+        </div>
+        <div id="hud-timer" class="hud-timer hidden" aria-live="polite">
+          <span class="hud-timer-label">До конца матча</span>
+          <span id="hud-timer-value" class="hud-timer-value">--:--</span>
         </div>
         <div class="hud-card hud-card--board">
           <div id="hud-leader" class="hud-leader"></div>
@@ -287,10 +301,16 @@
         </div>
         <div id="match-end" class="match-end hidden">
           <div class="match-end-card">
-            <p class="match-end-title">Итоги матча</p>
+            <p id="match-end-title" class="match-end-title">Итоги матча</p>
+            <p id="match-end-subtitle" class="match-end-subtitle"></p>
             <p id="match-end-score" class="match-end-score">0</p>
             <p id="match-end-detail" class="match-end-detail"></p>
-            <button type="button" id="match-end-menu" class="btn btn-primary">В меню</button>
+            <ol id="match-end-rows" class="match-end-rows hidden"></ol>
+            <div class="match-end-actions">
+              <button type="button" id="match-end-restart" class="btn btn-primary hidden">Новая публичная сессия</button>
+              <button type="button" id="match-end-menu" class="btn btn-secondary">В меню</button>
+            </div>
+            <p id="match-end-hint" class="match-end-hint"></p>
           </div>
         </div>
       </div>

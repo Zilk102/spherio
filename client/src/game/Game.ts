@@ -1,5 +1,5 @@
 import { Engine, Scene } from "@babylonjs/core";
-import type { KillFeedEntry, MatchEndMessage } from "@spherio/shared";
+import type { KillFeedEntry, MatchEndMessage, MatchResultsMessage } from "@spherio/shared";
 import type { Room } from "colyseus.js";
 import { clearReconnectToken, getPing } from "../net/colyseus.js";
 import { pickLargestLocalPart } from "../lib/playerParts.js";
@@ -8,7 +8,7 @@ import { CameraController } from "./CameraController.js";
 import { EntitySync } from "./EntitySync.js";
 import { InputController } from "./InputController.js";
 import { isTouchPrimaryDevice } from "../lib/touchDevice.js";
-import { updateHud } from "../ui/hud.js";
+import { showTargetBonusToast, updateHud, updateHudTarget, updateHudTimer } from "../ui/hud.js";
 import { KillFeedUi } from "../ui/killfeed.js";
 import { getChatUi } from "../ui/chat.js";
 import { DeathOverlay } from "../ui/death.js";
@@ -33,10 +33,19 @@ type PlayerSnap = {
   skinId: string;
   name: string;
   invulnUntil: number;
+  targetId: string;
+  targetExpiresAt: number;
 };
+
+interface TargetBonusMessage {
+  victimName: string;
+  mult: number;
+}
 
 export interface GameLeaveDetail {
   matchEnd?: MatchEndMessage;
+  /** Если true — пользователь хочет сразу попасть в новый публичный матч. */
+  restartPublic?: boolean;
 }
 
 export class Game {
@@ -73,6 +82,15 @@ export class Game {
   async connect(room: Room, playerName: string): Promise<void> {
     this.intentionalLeave = false;
     this.matchEnd.hide();
+    this.matchEnd.setHandlers({
+      onMenu: () => window.dispatchEvent(new CustomEvent("sphere3d:leave-game")),
+      onRestartPublic: () =>
+        window.dispatchEvent(
+          new CustomEvent<GameLeaveDetail>("sphere3d:leave-game", {
+            detail: { restartPublic: true },
+          }),
+        ),
+    });
     this.room = room;
     this.localId = room.sessionId;
     this.playerName = playerName;
@@ -88,6 +106,19 @@ export class Game {
       this.death.hide();
       window.dispatchEvent(
         new CustomEvent<GameLeaveDetail>("sphere3d:match-end", { detail: { matchEnd: msg } }),
+      );
+    });
+    room.onMessage("target_bonus", (msg: TargetBonusMessage) => {
+      showTargetBonusToast(msg);
+    });
+    room.onMessage("match_results", (msg: MatchResultsMessage & { you?: string }) => {
+      if (this.intentionalLeave || !document.body.classList.contains("in-game")) {
+        return;
+      }
+      this.matchEnd.showResults(msg);
+      this.death.hide();
+      window.dispatchEvent(
+        new CustomEvent<GameLeaveDetail>("sphere3d:match-end", { detail: {} }),
       );
     });
     room.onLeave((code) => {
@@ -180,6 +211,35 @@ export class Game {
               vz: p.vz,
             })),
             this.room ? getPing(this.room) : 0,
+          );
+
+          updateHudTimer({
+            matchEndsAt: typeof state.matchEndsAt === "number" ? state.matchEndsAt : 0,
+            matchPhase: typeof state.matchPhase === "string" ? state.matchPhase : "running",
+            isPrivate: !!state.isPrivate,
+          });
+
+          // Цель локального игрока + 3D-индикатор и HUD-строка.
+          const localTargetId = me?.targetId ?? "";
+          const localTargetExpires = me?.targetExpiresAt ?? 0;
+          const targetSnap = localTargetId
+            ? players.find((p) => p.id === localTargetId)
+            : undefined;
+          this.entities.updateTargetIndicator(
+            targetSnap ? targetSnap.id : null,
+            now,
+            this.localId,
+          );
+          updateHudTarget(
+            targetSnap
+              ? {
+                  name: targetSnap.name,
+                  radius: targetSnap.radius,
+                  myRadius: me?.radius ?? 0,
+                  expiresAt: localTargetExpires,
+                  now,
+                }
+              : null,
           );
         }
       }
