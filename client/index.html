@@ -2,26 +2,261 @@
 <html lang="ru">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Spherio</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Sphere3D — Сферы 3D</title>
+    <meta name="description" content="Сферы 3D — 3D арена в браузере. Катись, ешь, расти. sphere3d.ru" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Syne:wght@600;700;800&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
     <div id="overlay">
-      <div id="menu" class="panel">
-        <h1>Spherio</h1>
-        <p>3D agar.io — катись, ешь, расти</p>
-        <input id="nick" type="text" maxlength="16" placeholder="Никнейм" />
-        <button id="play-btn" type="button">Играть</button>
-        <p class="hint">WASD — движение · Пробел — тормоз</p>
+      <!-- Приветственный экран -->
+      <section id="welcome" class="welcome" aria-label="Главное меню">
+        <div class="welcome-bg" aria-hidden="true">
+          <span class="orb orb-a"></span>
+          <span class="orb orb-b"></span>
+          <span class="orb orb-c"></span>
+          <span class="grid-glow"></span>
+        </div>
+
+        <header class="welcome-header">
+          <div class="brand">
+            <span class="brand-mark" aria-hidden="true"></span>
+            <div>
+              <h1 class="brand-title">Sphere3D</h1>
+              <p class="brand-sub">Сферы 3D · <span class="brand-domain">sphere3d.ru</span></p>
+            </div>
+          </div>
+          <button type="button" id="user-pill" class="user-pill" data-drawer="account" title="Профиль">
+            <span id="auth-status" class="user-pill-text">…</span>
+          </button>
+        </header>
+
+        <main class="welcome-body">
+          <div id="play-hero-main" class="play-hero">
+            <label class="field" for="nick">
+              <span class="field-label">Ваш ник</span>
+              <input id="nick" type="text" maxlength="16" placeholder="Как вас зовут в арене?" autocomplete="nickname" />
+            </label>
+
+            <button type="button" id="skin-preview" class="skin-preview" data-drawer="skins" aria-label="Выбрать скин">
+              <span class="skin-preview-ball" id="skin-preview-ball"></span>
+              <span class="skin-preview-meta">
+                <span class="skin-preview-label">Скин</span>
+                <span id="skin-preview-name" class="skin-preview-name">Классика</span>
+              </span>
+              <span class="skin-preview-chevron" aria-hidden="true">›</span>
+            </button>
+
+            <button id="btn-ffa" type="button" class="cta-play">
+              <span class="cta-play-glow" aria-hidden="true"></span>
+              <span class="cta-play-text">В бой — публичная арена</span>
+            </button>
+
+            <button type="button" class="cta-secondary" data-drawer="lobby">
+              Играть с друзьями по коду
+            </button>
+          </div>
+
+          <nav class="quick-nav" aria-label="Дополнительно">
+            <button type="button" class="quick-nav-btn" data-drawer="friends">
+              <span class="quick-nav-icon">👥</span>
+              <span>Друзья</span>
+            </button>
+            <button type="button" class="quick-nav-btn" data-drawer="top">
+              <span class="quick-nav-icon">🏆</span>
+              <span>Топ</span>
+            </button>
+          </nav>
+
+          <p id="menu-hint" class="welcome-hint"></p>
+        </main>
+
+        <!-- Выдвижная панель (одна за раз) -->
+        <aside id="drawer" class="drawer" aria-hidden="true">
+          <div class="drawer-backdrop" data-drawer-close></div>
+          <div class="drawer-sheet" role="dialog" aria-modal="true">
+            <header class="drawer-head">
+              <h2 id="drawer-title" class="drawer-title">Раздел</h2>
+              <button type="button" class="drawer-close" data-drawer-close aria-label="Закрыть">×</button>
+            </header>
+            <div class="drawer-body">
+              <div class="drawer-panel" data-drawer-panel="lobby">
+                <p class="drawer-desc">Создайте комнату или введите код приглашения.</p>
+                <label class="field lobby-opt">
+                  <span class="field-label">Игроков в комнате</span>
+                  <input id="lobby-max" type="range" min="2" max="16" value="8" />
+                  <span id="lobby-max-val">8</span>
+                </label>
+                <label class="lobby-opt-check">
+                  <input id="lobby-bots" type="checkbox" />
+                  Боты в лобби
+                </label>
+                <button id="btn-create-lobby" type="button" class="btn btn-primary">Создать лобби</button>
+                <div id="lobby-created" class="invite-box hidden"></div>
+                <div class="field-row">
+                  <input id="lobby-code" type="text" maxlength="6" placeholder="Код комнаты" />
+                  <button id="btn-join-lobby" type="button" class="btn btn-accent">Войти</button>
+                </div>
+              </div>
+
+              <div class="drawer-panel hidden" data-drawer-panel="skins">
+                <p id="skins-hint" class="drawer-desc">Эмодзи, мячи и шары — для части скинов можно выбрать цвет.</p>
+                <label id="skin-color-row" class="skin-color-row hidden" for="skin-color">
+                  <span class="field-label">Цвет сферы</span>
+                  <input id="skin-color" type="color" value="#ffffff" />
+                </label>
+                <div id="skin-grid" class="skin-grid"></div>
+              </div>
+
+              <div class="drawer-panel hidden" data-drawer-panel="account">
+                <div id="auth-signed-in" class="auth-view hidden">
+                  <div class="auth-profile">
+                    <div id="auth-avatar" class="auth-avatar" aria-hidden="true"></div>
+                    <div class="auth-profile-meta">
+                      <p id="auth-display-name" class="auth-display-name"></p>
+                      <p id="auth-email-display" class="auth-email-display"></p>
+                    </div>
+                  </div>
+                  <p class="auth-id-line">
+                    ID:
+                    <button type="button" id="auth-copy-id" class="auth-id-btn" title="Скопировать"></button>
+                  </p>
+                  <button id="btn-logout" type="button" class="btn btn-ghost auth-logout">Выйти</button>
+                </div>
+
+                <div id="auth-signed-out" class="auth-view">
+                  <p id="auth-form-desc" class="drawer-desc">
+                    Войдите — прогресс и скины с гостевой сессии сохранятся.
+                  </p>
+                  <div class="auth-tabs" role="tablist">
+                    <button type="button" class="auth-tab active" data-auth-tab="login" role="tab">
+                      Вход
+                    </button>
+                    <button type="button" class="auth-tab" data-auth-tab="register" role="tab">
+                      Регистрация
+                    </button>
+                  </div>
+                  <form id="auth-form" class="auth-form" novalidate>
+                    <label class="field" for="auth-email">
+                      <span class="field-label">Email</span>
+                      <input id="auth-email" type="email" autocomplete="username" required />
+                    </label>
+                    <label class="field" for="auth-password">
+                      <span class="field-label">Пароль</span>
+                      <input
+                        id="auth-password"
+                        type="password"
+                        autocomplete="current-password"
+                        minlength="6"
+                        required
+                      />
+                    </label>
+                    <button id="btn-auth-submit" type="submit" class="btn btn-primary">Войти</button>
+                  </form>
+                  <button type="button" id="btn-guest-reset" class="auth-text-btn">
+                    Новая гостевая сессия
+                  </button>
+                </div>
+              </div>
+
+              <div class="drawer-panel hidden" data-drawer-panel="friends">
+                <p class="drawer-desc">Добавьте друга по ID из профиля.</p>
+                <div class="field-row">
+                  <input id="friend-id" type="text" placeholder="UUID друга" />
+                  <button id="btn-add-friend" type="button" class="btn btn-accent">+</button>
+                </div>
+                <div id="friends-list" class="friends-list"></div>
+              </div>
+
+              <div class="drawer-panel hidden" data-drawer-panel="top">
+                <div class="top-tabs">
+                  <button type="button" class="top-tab active" data-period="all">Всё время</button>
+                  <button type="button" class="top-tab" data-period="daily">Сегодня</button>
+                </div>
+                <div id="menu-leaderboard" class="leaderboard-list">Загрузка…</div>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <p id="status" class="welcome-status" role="status"></p>
+      </section>
+
+      <!-- Игровой HUD -->
+      <div id="hud" class="hud hidden">
+        <div class="hud-card hud-card--player">
+          <div id="hud-name" class="hud-name"></div>
+          <div id="hud-stats" class="hud-stats"></div>
+        </div>
+        <div class="hud-card hud-card--board">
+          <div id="hud-leader" class="hud-leader"></div>
+          <div id="hud-ping" class="hud-ping"></div>
+        </div>
+        <div id="hud-controls" class="hud-keys"></div>
+        <button type="button" id="btn-leave" class="hud-leave">Меню</button>
       </div>
-      <div id="hud" class="panel hidden">
-        <div id="hud-name"></div>
-        <div id="hud-stats"></div>
-        <div id="hud-leader"></div>
-        <div id="hud-ping"></div>
+
+      <div id="in-game-menu" class="in-game-menu hidden" aria-hidden="true">
+        <div class="in-game-menu-card">
+          <button id="btn-resume" type="button" class="cta-play">
+            <span class="cta-play-text">Продолжить</span>
+          </button>
+          <button id="btn-exit-match" type="button" class="cta-secondary cta-secondary--danger">
+            Выйти из матча
+          </button>
+        </div>
       </div>
-      <div id="status"></div>
+
+      <div id="game-ui" class="game-ui hidden">
+        <div id="killfeed" class="killfeed" aria-live="polite"></div>
+        <div id="death-overlay" class="death-overlay hidden">
+          <div class="death-card">
+            <p class="death-msg">Вас съели</p>
+            <p class="death-sub">Респавн через мгновение…</p>
+          </div>
+        </div>
+        <div id="match-end" class="match-end hidden">
+          <div class="match-end-card">
+            <p class="match-end-title">Итоги матча</p>
+            <p id="match-end-score" class="match-end-score">0</p>
+            <p id="match-end-detail" class="match-end-detail"></p>
+            <button type="button" id="match-end-menu" class="btn btn-primary">В меню</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Чат: fixed к viewport, не внутри game-ui flow -->
+      <div id="chat-root" class="chat-wrap hidden" aria-label="Чат">
+        <button id="chat-toggle" type="button" class="chat-toggle" aria-expanded="false" title="Чат (Enter)">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M4 5h16v10H8l-4 4V5z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <aside id="chat-panel" class="chat-panel">
+          <div id="chat-log" class="chat-log"></div>
+          <div class="chat-compose">
+            <input id="chat-input" type="text" maxlength="120" placeholder="Сообщение…" autocomplete="off" />
+            <button id="chat-send" type="button" class="chat-send" aria-label="Отправить">↑</button>
+          </div>
+          <p class="chat-hint">Enter — отправить · Esc — закрыть</p>
+        </aside>
+      </div>
+
+      <div id="controls" class="controls hidden">
+        <div id="joystick-zone" class="joystick-zone">
+          <div id="joystick-knob" class="joystick-knob"></div>
+        </div>
+        <div class="action-cluster">
+          <button id="btn-boost" type="button" class="action-btn action-btn--boost" data-key="⇧"><kbd>⇧</kbd><span>Boost</span></button>
+          <button id="btn-brake" type="button" class="action-btn action-btn--brake" data-key="␣"><kbd>␣</kbd><span>Стоп</span></button>
+        </div>
+      </div>
     </div>
     <canvas id="renderCanvas"></canvas>
     <script type="module" src="/src/main.ts"></script>

@@ -1,10 +1,31 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: spherio
+      POSTGRES_PASSWORD: spherio
+      POSTGRES_DB: spherio
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+
   server:
     build:
       context: .
       dockerfile: server/Dockerfile.dev
     ports:
       - "${COLYSEUS_PORT:-2567}:2567"
+    environment:
+      DATABASE_URL: "postgresql://spherio:spherio@postgres:5432/spherio"
+      REDIS_URL: "redis://redis:6379"
+      JWT_SECRET: "${JWT_SECRET:-dev-secret}"
+    depends_on:
+      - postgres
+      - redis
     volumes:
       - ./server/src:/app/server/src
       - ./shared/src:/app/shared/src

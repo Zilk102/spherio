@@ -11,8 +11,12 @@ export default defineConfig({
     host: true,
     port: 5173,
     proxy: {
+      "/api": {
+        target: process.env.VITE_PROXY_TARGET ?? "http://localhost:2567",
+        changeOrigin: true,
+      },
       "/colyseus": {
-        target: process.env.VITE_PROXY_TARGET ?? "http://server:2567",
+        target: process.env.VITE_PROXY_TARGET ?? "http://localhost:2567",
         ws: true,
         changeOrigin: true,
       },

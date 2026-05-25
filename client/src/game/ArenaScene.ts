@@ -10,38 +10,41 @@ import {
 import { ARENA_HALF, ARENA_SIZE } from "@spherio/shared";
 
 export function buildArena(scene: Scene): void {
-  scene.clearColor = new Color4(0.04, 0.07, 0.12, 1);
+  scene.clearColor = new Color4(0.06, 0.1, 0.14, 1);
 
-  const light = new HemisphericLight("sun", new Vector3(0.3, 1, 0.2), scene);
-  light.intensity = 1.1;
-  light.groundColor = new Color3(0.15, 0.2, 0.28);
+  const hemi = new HemisphericLight("hemi", new Vector3(0.2, 1, 0.1), scene);
+  hemi.intensity = 0.95;
+  hemi.groundColor = new Color3(0.12, 0.16, 0.14);
+  hemi.diffuse = new Color3(0.92, 0.94, 0.98);
 
   const ground = MeshBuilder.CreateGround(
     "ground",
-    { width: ARENA_SIZE, height: ARENA_SIZE },
+    { width: ARENA_SIZE, height: ARENA_SIZE, subdivisions: 1 },
     scene,
   );
-  const gMat = new StandardMaterial("groundMat", scene);
-  gMat.diffuseColor = new Color3(0.12, 0.22, 0.18);
-  gMat.specularColor = new Color3(0.05, 0.08, 0.06);
-  ground.material = gMat;
-  ground.receiveShadows = true;
+  const groundMat = new StandardMaterial("groundMat", scene);
+  groundMat.diffuseColor = new Color3(0.2, 0.32, 0.26);
+  groundMat.specularColor = new Color3(0.02, 0.02, 0.02);
+  groundMat.specularPower = 4;
+  ground.material = groundMat;
 
   const grid = MeshBuilder.CreateGround(
     "grid",
-    { width: ARENA_SIZE, height: ARENA_SIZE, subdivisions: 20 },
+    { width: ARENA_SIZE, height: ARENA_SIZE, subdivisions: 24 },
     scene,
   );
   const gridMat = new StandardMaterial("gridMat", scene);
   gridMat.wireframe = true;
-  gridMat.alpha = 0.15;
-  gridMat.diffuseColor = new Color3(0.3, 0.55, 0.45);
+  gridMat.alpha = 0.12;
+  gridMat.diffuseColor = new Color3(0.45, 0.7, 0.55);
+  gridMat.specularColor = Color3.Black();
   grid.material = gridMat;
-  grid.position.y = 0.02;
+  grid.position.y = 0.01;
 
   const wallMat = new StandardMaterial("wallMat", scene);
-  wallMat.diffuseColor = new Color3(0.2, 0.35, 0.5);
+  wallMat.diffuseColor = new Color3(0.22, 0.32, 0.42);
   wallMat.alpha = 0.35;
+  wallMat.specularColor = Color3.Black();
 
   const h = 2;
   const t = 0.5;

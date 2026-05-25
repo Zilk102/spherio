@@ -1,39 +1,60 @@
-# Spherio
+# Sphere3D (Сферы 3D)
 
-3D agar.io в браузере: катящиеся сферы с физикой (Rapier на сервере), рендер Babylon.js, мультиплеер Colyseus.
+Браузерная 3D-арена — [sphere3d.ru](https://sphere3d.ru)
 
-## Запуск (только Docker)
+3D agar.io в браузере: катящиеся сферы (Rapier), Babylon.js, Colyseus.
 
-### Разработка (hot reload)
+**Статус:** база + **фаза 1** (меню, скины, лобби, API, топ). Дальше — [ROADMAP.md](./ROADMAP.md).
+
+## Запуск (Docker)
+
+**Сборка и фон:**
+
+```bash
+docker compose up --build -d
+npm run test:smoke
+```
+
+- Клиент: http://localhost:8080  
+- Сервер: http://localhost:2567  
+
+**Разработка (hot reload):**
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 ```
 
-Откройте http://localhost:8080
+## Меню
 
-### Production-like
+| Вкладка | Функция |
+|---------|---------|
+| **Играть** | Публичная FFA-арена |
+| **Лобби** | Создать комнату с кодом / войти по коду |
+| **Скины** | 8 бесплатных скинов |
+| **Топ** | Глобальная таблица |
 
-```bash
-docker compose up --build
-```
+## API
 
-Клиент: http://localhost:8080 — WebSocket проксируется через nginx на `/colyseus`.
+| Метод | Путь |
+|-------|------|
+| GET | `/health` |
+| POST | `/api/auth/guest` |
+| POST | `/api/lobby/create` |
+| GET | `/api/lobby/:code` |
+| GET | `/api/leaderboard?period=all\|daily` |
 
 ## Управление
 
-- **WASD** / стрелки — качение
-- **Пробел** — торможение
+- **WASD** / стрелки — относительно экрана  
+- **Пробел** — тормоз  
 
 ## Структура
 
-- `client/` — Babylon.js + Vite
-- `server/` — Colyseus + Rapier (авторитетная физика)
-- `shared/` — константы и формулы массы/момента
+- `client/` — Babylon + меню  
+- `server/` — Colyseus + API  
+- `shared/` — физика, скины, типы  
+- `scripts/smoke-test.mjs` — проверка после деплоя  
 
-## Переменные (.env)
+## Переменные
 
-Скопируйте `.env.example` в `.env` при необходимости:
-
-- `CLIENT_PORT` — порт клиента (по умолчанию 8080)
-- `COLYSEUS_PORT` — порт сервера (2567)
+См. `.env.example`.

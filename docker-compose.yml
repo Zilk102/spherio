@@ -1,4 +1,27 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: spherio
+      POSTGRES_PASSWORD: spherio
+      POSTGRES_DB: spherio
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U spherio -d spherio"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+
   server:
     build:
       context: .
@@ -7,12 +30,20 @@ services:
       - "${COLYSEUS_PORT:-2567}:2567"
     environment:
       COLYSEUS_PORT: "2567"
+      DATABASE_URL: "postgresql://spherio:spherio@postgres:5432/spherio"
+      REDIS_URL: "redis://redis:6379"
+      JWT_SECRET: "${JWT_SECRET:-change-me-in-production}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:2567/health"]
       interval: 10s
       timeout: 5s
-      retries: 3
-      start_period: 15s
+      retries: 5
+      start_period: 40s
 
   client:
     build:
@@ -23,3 +54,7 @@ services:
     depends_on:
       server:
         condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:

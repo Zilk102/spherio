@@ -1,6 +1,10 @@
+import { scoreFromRadius } from "@spherio/shared";
+
 interface PlayerHud {
   name: string;
   radius: number;
+  vx: number;
+  vz: number;
 }
 
 export function updateHud(
@@ -16,17 +20,22 @@ export function updateHud(
 
   if (me) {
     nameEl.textContent = me.name;
-    statsEl.textContent = `Радиус: ${me.radius.toFixed(2)}`;
+    const score = scoreFromRadius(me.radius);
+    const speed = Math.hypot(me.vx, me.vz);
+    statsEl.textContent = `Очки: ${score} · размер ${me.radius.toFixed(2)} · ${speed.toFixed(1)} м/с`;
   }
 
   const sorted = [...all]
     .sort((a, b) => b.radius - a.radius)
     .slice(0, 5);
   leaderEl.innerHTML =
-    "<strong>Топ</strong><br>" +
+    "<span class=\"hud-board-title\">Арена</span>" +
     sorted
-      .map((p, i) => `${i + 1}. ${p.name} (${p.radius.toFixed(1)})`)
-      .join("<br>");
+      .map((p, i) => {
+        const score = scoreFromRadius(p.radius);
+        return `<div class="lb-row"><span>${i + 1}</span> ${p.name} <em>${score}</em></div>`;
+      })
+      .join("");
 
   pingEl.textContent = `Ping: ${Math.round(ping)} ms`;
 }

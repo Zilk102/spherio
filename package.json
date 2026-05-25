@@ -5,6 +5,10 @@
   "scripts": {
     "build": "npm run build -w @spherio/shared && npm run build -w @spherio/server && npm run build -w @spherio/client",
     "dev:server": "npm run dev -w @spherio/server",
-    "dev:client": "npm run dev -w @spherio/client"
+    "dev:client": "npm run dev -w @spherio/client",
+    "test:smoke": "node scripts/smoke-test.mjs",
+    "docker:up": "docker compose up --build -d",
+    "docker:down": "docker compose down",
+    "docker:test": "docker compose up --build -d && node scripts/smoke-test.mjs http://localhost:8080"
   }
 }

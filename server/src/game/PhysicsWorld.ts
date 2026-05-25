@@ -1,8 +1,11 @@
 import RAPIER from "@dimforge/rapier3d-compat";
 import {
   ARENA_HALF,
+  BOOST_SPEED_MULTIPLIER,
+  GRAVITY,
+  GROUND_FRICTION,
+  GROUND_Y,
   MAX_ANGULAR_SPEED,
-  MAX_LINEAR_SPEED,
   SPHERE_FRICTION,
   SPHERE_RESTITUTION,
   WALL_HEIGHT,
@@ -12,13 +15,17 @@ import {
   clampRadius,
   linearDampingForMass,
   massFromRadius,
-  rollTorqueImpulse,
-  brakeImpulse,
+  maxLinearSpeedForRadius,
+  rollingBrakeTorque,
+  rollingDriveImpulse,
+  rollingDriveTorque,
 } from "@spherio/shared";
 import type { InputMessage } from "@spherio/shared";
 
 export interface PlayerBody {
   id: string;
+  /** Владелец сессии (для split-частей совпадает с sessionId игрока) */
+  ownerId: string;
   radius: number;
   mass: number;
   body: RAPIER.RigidBody;
@@ -34,16 +41,19 @@ export class PhysicsWorld {
   async init(): Promise<void> {
     if (this.initialized) return;
     await RAPIER.init();
-    this.world = new RAPIER.World({ x: 0, y: -20, z: 0 });
+    this.world = new RAPIER.World({ x: 0, y: -GRAVITY, z: 0 });
     this.createArena();
     this.initialized = true;
   }
 
   private createArena(): void {
+    const groundBody = this.world.createRigidBody(
+      RAPIER.RigidBodyDesc.fixed().setTranslation(0, GROUND_Y - 0.5, 0),
+    );
     const groundDesc = RAPIER.ColliderDesc.cuboid(ARENA_HALF, 0.5, ARENA_HALF)
-      .setFriction(1.2)
-      .setRestitution(0);
-    this.world.createCollider(groundDesc);
+      .setFriction(GROUND_FRICTION)
+      .setRestitution(0.15);
+    this.world.createCollider(groundDesc, groundBody);
 
     const wallT = 1;
     const h = WALL_HEIGHT / 2;
@@ -58,15 +68,22 @@ export class PhysicsWorld {
       const sizeZ = x === 0 ? wallT : ARENA_HALF + wallT;
       const wall = RAPIER.ColliderDesc.cuboid(sizeX, h, sizeZ)
         .setTranslation(x, y, z)
-        .setFriction(0.6);
+        .setFriction(0.5)
+        .setRestitution(0.2);
       this.world.createCollider(wall);
     }
   }
 
-  addPlayer(id: string, radius: number, x: number, z: number): PlayerBody {
+  addPlayer(
+    id: string,
+    radius: number,
+    x: number,
+    z: number,
+    ownerId?: string,
+  ): PlayerBody {
     const r = clampRadius(radius);
     const mass = massFromRadius(r);
-    const y = r + 0.05;
+    const y = GROUND_Y + r + 0.02;
     const bodyDesc = RAPIER.RigidBodyDesc.dynamic()
       .setTranslation(x, y, z)
       .setLinearDamping(linearDampingForMass(mass))
@@ -81,6 +98,7 @@ export class PhysicsWorld {
 
     const entry: PlayerBody = {
       id,
+      ownerId: ownerId ?? id,
       radius: r,
       mass,
       body,
@@ -101,16 +119,7 @@ export class PhysicsWorld {
   setInput(id: string, input: InputMessage): void {
     const p = this.players.get(id);
     if (!p) return;
-    const len = Math.hypot(input.moveX, input.moveZ);
-    if (len > 1) {
-      p.input = {
-        moveX: input.moveX / len,
-        moveZ: input.moveZ / len,
-        brake: input.brake,
-      };
-    } else {
-      p.input = { moveX: input.moveX, moveZ: input.moveZ, brake: input.brake };
-    }
+    p.input = { ...input };
   }
 
   setRadius(id: string, radius: number): void {
@@ -127,8 +136,6 @@ export class PhysicsWorld {
       .setRestitution(SPHERE_RESTITUTION)
       .setDensity(p.mass / ((4 / 3) * Math.PI * r ** 3));
     p.collider = this.world.createCollider(colliderDesc, p.body);
-    const t = p.body.translation();
-    p.body.setTranslation({ x: t.x, y: r + 0.05, z: t.z }, true);
   }
 
   teleport(id: string, x: number, z: number, radius: number): void {
@@ -138,7 +145,7 @@ export class PhysicsWorld {
     const r = p.radius;
     p.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
     p.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
-    p.body.setTranslation({ x, y: r + 0.05, z }, true);
+    p.body.setTranslation({ x, y: GROUND_Y + r + 0.02, z }, true);
   }
 
   getPlayer(id: string): PlayerBody | undefined {
@@ -151,37 +158,94 @@ export class PhysicsWorld {
 
   step(dt: number): void {
     for (const p of this.players.values()) {
-      const { moveX, moveZ, brake } = p.input;
-      if (Math.abs(moveX) > 0.01 || Math.abs(moveZ) > 0.01) {
-        const t = rollTorqueImpulse(p.radius, moveX, moveZ);
-        p.body.applyTorqueImpulse(t, true);
+      const { moveX, moveZ, brake, boost } = p.input;
+      const len = Math.hypot(moveX, moveZ);
+      const moving = len > 0.06;
+      const boosting = boost && moving;
+      const boostMul = boosting ? BOOST_SPEED_MULTIPLIER : 1;
+
+      if (moving) {
+        const nx = moveX / len;
+        const nz = moveZ / len;
+        const v = p.body.linvel();
+        const torque = rollingDriveTorque(
+          p.radius,
+          p.mass,
+          nx,
+          nz,
+          v.x,
+          v.z,
+        );
+        const impulse = rollingDriveImpulse(
+          p.radius,
+          p.mass,
+          nx,
+          nz,
+          v.x,
+          v.z,
+        );
+        p.body.applyImpulse(
+          {
+            x: impulse.x * dt * boostMul,
+            y: 0,
+            z: impulse.z * dt * boostMul,
+          },
+          true,
+        );
+        p.body.applyTorqueImpulse(
+          {
+            x: torque.x * dt * boostMul,
+            y: torque.y * dt * boostMul,
+            z: torque.z * dt * boostMul,
+          },
+          true,
+        );
+        if (boosting) {
+          const burst = 1.1 * p.mass;
+          p.body.applyImpulse({ x: nx * burst * dt, y: 0, z: nz * burst * dt }, true);
+        }
       }
+
       if (brake) {
         const v = p.body.linvel();
-        const imp = brakeImpulse(p.mass, v.x, v.z);
-        p.body.applyImpulse({ x: imp.x, y: 0, z: imp.z }, true);
+        const av = p.body.angvel();
+        const b = rollingBrakeTorque(p.mass, p.radius, v.x, v.z, av);
+        p.body.applyImpulse(
+          { x: b.linImpulse.x * dt, y: 0, z: b.linImpulse.z * dt },
+          true,
+        );
+        p.body.applyTorqueImpulse(
+          {
+            x: b.angImpulse.x * dt,
+            y: b.angImpulse.y * dt,
+            z: b.angImpulse.z * dt,
+          },
+          true,
+        );
       }
-      p.input.brake = false;
     }
+
     this.world.timestep = dt;
     this.world.step();
-    this.clampVelocities();
+
+    for (const p of this.players.values()) {
+      this.clampPlayerVelocity(p);
+    }
   }
 
-  private clampVelocities(): void {
-    for (const p of this.players.values()) {
-      const lv = p.body.linvel();
-      const ls = Math.hypot(lv.x, lv.y, lv.z);
-      if (ls > MAX_LINEAR_SPEED) {
-        const s = MAX_LINEAR_SPEED / ls;
-        p.body.setLinvel({ x: lv.x * s, y: lv.y * s, z: lv.z * s }, true);
-      }
-      const av = p.body.angvel();
-      const as = Math.hypot(av.x, av.y, av.z);
-      if (as > MAX_ANGULAR_SPEED) {
-        const s = MAX_ANGULAR_SPEED / as;
-        p.body.setAngvel({ x: av.x * s, y: av.y * s, z: av.z * s }, true);
-      }
+  private clampPlayerVelocity(p: PlayerBody): void {
+    const maxLin = maxLinearSpeedForRadius(p.radius);
+    const lv = p.body.linvel();
+    const ls = Math.hypot(lv.x, lv.y, lv.z);
+    if (ls > maxLin) {
+      const s = maxLin / ls;
+      p.body.setLinvel({ x: lv.x * s, y: lv.y * s, z: lv.z * s }, true);
+    }
+    const av = p.body.angvel();
+    const as = Math.hypot(av.x, av.y, av.z);
+    if (as > MAX_ANGULAR_SPEED) {
+      const s = MAX_ANGULAR_SPEED / as;
+      p.body.setAngvel({ x: av.x * s, y: av.y * s, z: av.z * s }, true);
     }
   }
 }

@@ -1,34 +1,45 @@
-import { joinArena } from "./net/colyseus.js";
-import { Game } from "./game/Game.js";
+import { MainMenu } from "./ui/menu.js";
+import { getChatUi } from "./ui/chat.js";
+import { isTouchPrimaryDevice } from "./lib/touchDevice.js";
+
+getChatUi();
 
 const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
-const menu = document.getElementById("menu");
-const hud = document.getElementById("hud");
-const playBtn = document.getElementById("play-btn");
-const nickInput = document.getElementById("nick") as HTMLInputElement;
+const controls = document.getElementById("controls");
 const status = document.getElementById("status");
+const menuHint = document.getElementById("menu-hint");
 
-let game: Game | null = null;
+if (menuHint) {
+  menuHint.textContent = isTouchPrimaryDevice()
+    ? "Джойстик — движение · кнопки справа · Enter — чат"
+    : "WASD — движение · Shift — ускорение · Space — тормоз · Меню";
+}
+
+const hudControls = document.getElementById("hud-controls");
+if (hudControls) {
+  hudControls.textContent = isTouchPrimaryDevice()
+    ? "Чат: кнопка или Enter"
+    : "Чат: Enter открыть · Esc закрыть";
+}
+
+if (controls && !isTouchPrimaryDevice()) {
+  controls.classList.add("touch-only");
+}
 
 function setStatus(msg: string): void {
   if (status) status.textContent = msg;
 }
 
-playBtn?.addEventListener("click", async () => {
-  const name = nickInput?.value.trim() || "Игрок";
-  playBtn.setAttribute("disabled", "true");
-  setStatus("Подключение…");
-  try {
-    const room = await joinArena(name);
-    game = new Game(canvas);
-    await game.connect(room);
-    game.startLoop();
-    menu?.classList.add("hidden");
-    hud?.classList.remove("hidden");
-    setStatus("");
-  } catch (e) {
-    console.error(e);
-    setStatus("Ошибка подключения. Проверьте сервер.");
-    playBtn.removeAttribute("disabled");
-  }
+const menu = new MainMenu(canvas, {
+  setStatus,
+  onEnterGame: () => {
+    document.body.classList.add("in-game");
+    if (isTouchPrimaryDevice()) {
+      document.body.classList.add("in-game--touch");
+    }
+    controls?.classList.remove("hidden");
+    if (!isTouchPrimaryDevice()) {
+      controls?.classList.add("touch-only");
+    }
+  },
 });
