@@ -632,13 +632,6 @@ body {
   box-shadow: 0 0 20px var(--skin-glow, rgba(58, 158, 255, 0.35));
 }
 
-.auth-display-name {
-  font-family: var(--font-display);
-  font-size: 1.05rem;
-  font-weight: 700;
-  margin: 0 0 4px;
-}
-
 .auth-email-display {
   margin: 0;
   font-size: 0.82rem;
@@ -668,8 +661,24 @@ body {
   border-color: var(--border-strong);
 }
 
+.auth-signed-in .btn-primary {
+  margin-bottom: 12px;
+}
+
 .auth-logout {
   width: 100%;
+}
+
+.nick-account-hint {
+  margin: -4px 0 12px;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.nick-account-hint strong {
+  color: var(--text);
+  font-weight: 600;
 }
 
 .auth-text-btn {

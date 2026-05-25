@@ -39,10 +39,13 @@
 
         <main class="welcome-body">
           <div id="play-hero-main" class="play-hero">
-            <label class="field" for="nick">
+            <label id="nick-row" class="field" for="nick">
               <span class="field-label">Ваш ник</span>
               <input id="nick" type="text" maxlength="16" placeholder="Как вас зовут в арене?" autocomplete="nickname" />
             </label>
+            <p id="nick-account-hint" class="nick-account-hint hidden">
+              Вы вошли как <strong id="nick-account-name"></strong> — ник в профиле, менять не нужно.
+            </p>
 
             <button type="button" id="skin-preview" class="skin-preview" data-drawer="skins" aria-label="Выбрать скин">
               <span class="skin-preview-ball" id="skin-preview-ball"></span>
@@ -119,10 +122,14 @@
                   <div class="auth-profile">
                     <div id="auth-avatar" class="auth-avatar" aria-hidden="true"></div>
                     <div class="auth-profile-meta">
-                      <p id="auth-display-name" class="auth-display-name"></p>
                       <p id="auth-email-display" class="auth-email-display"></p>
                     </div>
                   </div>
+                  <label class="field" for="profile-nick">
+                    <span class="field-label">Ник в игре</span>
+                    <input id="profile-nick" type="text" maxlength="16" autocomplete="nickname" />
+                  </label>
+                  <button id="btn-save-profile" type="button" class="btn btn-primary">Сохранить ник</button>
                   <p class="auth-id-line">
                     ID:
                     <button type="button" id="auth-copy-id" class="auth-id-btn" title="Скопировать"></button>
@@ -143,6 +150,16 @@
                     </button>
                   </div>
                   <form id="auth-form" class="auth-form" novalidate>
+                    <label id="auth-nick-row" class="field hidden" for="auth-nick">
+                      <span class="field-label">Ник в игре</span>
+                      <input
+                        id="auth-nick"
+                        type="text"
+                        maxlength="16"
+                        autocomplete="nickname"
+                        placeholder="Как вас зовут в арене?"
+                      />
+                    </label>
                     <label class="field" for="auth-email">
                       <span class="field-label">Email</span>
                       <input id="auth-email" type="email" autocomplete="username" required />

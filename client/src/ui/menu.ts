@@ -28,6 +28,7 @@ import { Game } from "../game/Game.js";
 
 const SKIN_KEY = "sphere3d_skin";
 const SKIN_COLOR_KEY = "sphere3d_skin_color";
+const NICK_KEY = "sphere3d_nick";
 const LEGACY_SKIN_KEY = "spherio_skin";
 
 function loadSkinId(): string {
@@ -75,6 +76,7 @@ export class MainMenu {
     this.bindLobby();
     this.bindFriends();
     this.bindAuth();
+    this.bindNick();
     this.bindTopTabs();
     this.applyInviteFromUrl();
     this.bindLeave();
@@ -191,6 +193,7 @@ export class MainMenu {
         this.updateUserPill(profile.guest);
         this.updateSkinPreview();
         this.renderSkins();
+        this.syncNickUi();
         this.updateAccountPanel();
         return;
       } catch {
@@ -205,9 +208,28 @@ export class MainMenu {
       this.updateUserPill(true);
       this.updateSkinPreview();
       this.renderSkins();
+      this.syncNickUi();
       this.updateAccountPanel();
     } catch {
       this.cb.setStatus("Сервер недоступен — запустите docker compose up");
+    }
+  }
+
+  private syncNickUi(): void {
+    const nickRow = document.getElementById("nick-row");
+    const hint = document.getElementById("nick-account-hint");
+    const hintName = document.getElementById("nick-account-name");
+    const nickEl = document.getElementById("nick") as HTMLInputElement | null;
+    const guest = this.isGuest;
+
+    nickRow?.classList.toggle("hidden", !guest);
+    hint?.classList.toggle("hidden", guest);
+    if (!guest && this.auth) {
+      if (hintName) hintName.textContent = this.auth.displayName;
+      if (nickEl) nickEl.value = "";
+    } else if (nickEl) {
+      const saved = localStorage.getItem(NICK_KEY);
+      if (saved && !nickEl.value.trim()) nickEl.value = saved;
     }
   }
 
@@ -328,12 +350,17 @@ export class MainMenu {
       void this.doGuest();
     });
 
+    document.getElementById("btn-save-profile")?.addEventListener("click", () => {
+      void this.saveProfileNick();
+    });
+
     document.getElementById("btn-logout")?.addEventListener("click", () => {
       clearAuth();
       this.profileEmail = null;
       void this.initAuth();
       this.authTab = "login";
       this.syncAuthTabUi();
+      this.syncNickUi();
       this.cb.setStatus("Выход выполнен");
     });
 
@@ -349,6 +376,14 @@ export class MainMenu {
     this.syncAuthTabUi();
   }
 
+  private bindNick(): void {
+    document.getElementById("nick")?.addEventListener("change", () => {
+      if (!this.isGuest) return;
+      const v = (document.getElementById("nick") as HTMLInputElement)?.value.trim();
+      if (v) localStorage.setItem(NICK_KEY, v);
+    });
+  }
+
   private syncAuthTabUi(): void {
     document.querySelectorAll("[data-auth-tab]").forEach((el) => {
       el.classList.toggle("active", (el as HTMLElement).dataset.authTab === this.authTab);
@@ -356,17 +391,58 @@ export class MainMenu {
     const submit = document.getElementById("btn-auth-submit");
     const password = document.getElementById("auth-password") as HTMLInputElement | null;
     const desc = document.getElementById("auth-form-desc");
+    const nickRow = document.getElementById("auth-nick-row");
+    const authNick = document.getElementById("auth-nick") as HTMLInputElement | null;
+    const isRegister = this.authTab === "register";
+
+    nickRow?.classList.toggle("hidden", !isRegister);
+    if (isRegister && authNick) {
+      const mainNick = (document.getElementById("nick") as HTMLInputElement)?.value.trim();
+      if (mainNick && !authNick.value.trim()) authNick.value = mainNick;
+      authNick.required = true;
+    } else if (authNick) {
+      authNick.required = false;
+    }
+
     if (submit) {
-      submit.textContent = this.authTab === "login" ? "Войти" : "Создать аккаунт";
+      submit.textContent = isRegister ? "Создать аккаунт" : "Войти";
     }
     if (password) {
-      password.autocomplete = this.authTab === "login" ? "current-password" : "new-password";
+      password.autocomplete = isRegister ? "new-password" : "current-password";
     }
     if (desc) {
-      desc.textContent =
-        this.authTab === "login"
-          ? "Войдите — прогресс и скины с гостевой сессии сохранятся."
-          : "Пароль не короче 6 символов. Ник из поля выше попадёт в профиль.";
+      desc.textContent = isRegister
+        ? "Укажите ник — он сохранится в аккаунте и не придётся вводить каждый раз."
+        : "Войдите — прогресс и скины с гостевой сессии сохранятся.";
+    }
+  }
+
+  private getRegisterNick(): string {
+    return (document.getElementById("auth-nick") as HTMLInputElement)?.value.trim() ?? "";
+  }
+
+  private async saveProfileNick(): Promise<void> {
+    const name = (document.getElementById("profile-nick") as HTMLInputElement)?.value.trim();
+    if (!name || name.length < 2) {
+      this.cb.setStatus("Ник от 2 символов");
+      return;
+    }
+    if (!this.auth?.token || this.isGuest) return;
+    try {
+      const profile = await patchProfile({ displayName: name }, this.auth.token);
+      this.auth = {
+        ...this.auth,
+        displayName: profile.displayName,
+        equippedSkinId: profile.equippedSkinId,
+        ownedSkinIds: profile.ownedSkinIds,
+      };
+      saveAuth(this.auth, false);
+      this.updateUserPill(false);
+      this.syncNickUi();
+      this.updateAccountPanel();
+      this.cb.setStatus(`Ник сохранён: ${profile.displayName}`);
+    } catch (e) {
+      this.cb.setStatus(e instanceof Error ? e.message : "Не удалось сохранить");
     }
   }
 
@@ -384,11 +460,11 @@ export class MainMenu {
     }
 
     if (!guest && this.auth) {
-      const nameEl = document.getElementById("auth-display-name");
+      const profileNick = document.getElementById("profile-nick") as HTMLInputElement | null;
       const emailEl = document.getElementById("auth-email-display");
       const avatar = document.getElementById("auth-avatar");
       const idBtn = document.getElementById("auth-copy-id");
-      if (nameEl) nameEl.textContent = this.auth.displayName;
+      if (profileNick) profileNick.value = this.auth.displayName;
       if (emailEl) {
         emailEl.textContent = this.profileEmail ?? "Email не указан";
       }
@@ -420,9 +496,13 @@ export class MainMenu {
   private async doRegister(): Promise<void> {
     const email = (document.getElementById("auth-email") as HTMLInputElement)?.value.trim();
     const password = (document.getElementById("auth-password") as HTMLInputElement)?.value;
-    const displayName = this.getNick();
+    const displayName = this.getRegisterNick();
     if (!email || password.length < 6) {
       this.cb.setStatus("Email и пароль (≥6 символов)");
+      return;
+    }
+    if (displayName.length < 2) {
+      this.cb.setStatus("Укажите ник (от 2 символов)");
       return;
     }
     try {
@@ -441,9 +521,10 @@ export class MainMenu {
       this.updateUserPill(false);
       this.updateSkinPreview();
       this.renderSkins();
+      this.syncNickUi();
       this.updateAccountPanel();
       this.closeDrawer();
-      this.cb.setStatus("Аккаунт создан");
+      this.cb.setStatus(`Аккаунт создан · ник ${this.auth.displayName}`);
     } catch (e) {
       this.cb.setStatus(e instanceof Error ? e.message : "Ошибка регистрации");
     }
@@ -467,9 +548,10 @@ export class MainMenu {
       this.updateUserPill(false);
       this.updateSkinPreview();
       this.renderSkins();
+      this.syncNickUi();
       this.updateAccountPanel();
       this.closeDrawer();
-      this.cb.setStatus("Добро пожаловать!");
+      this.cb.setStatus(`Добро пожаловать, ${this.auth.displayName}!`);
     } catch {
       this.cb.setStatus("Неверный email или пароль");
     }
@@ -485,6 +567,7 @@ export class MainMenu {
       this.updateUserPill(true);
       this.updateSkinPreview();
       this.renderSkins();
+      this.syncNickUi();
       this.updateAccountPanel();
       this.cb.setStatus("Новая гостевая сессия");
     } catch {
@@ -606,8 +689,12 @@ export class MainMenu {
   }
 
   private getNick(): string {
+    if (!this.isGuest && this.auth?.displayName) {
+      return this.auth.displayName.slice(0, 16);
+    }
     const input = document.getElementById("nick") as HTMLInputElement | null;
-    return (input?.value.trim() || this.auth?.displayName || "Игрок").slice(0, 16);
+    const v = input?.value.trim() || localStorage.getItem(NICK_KEY)?.trim();
+    return (v || "Игрок").slice(0, 16);
   }
 
   private async startGame(joinFn: () => Promise<Room>): Promise<void> {
