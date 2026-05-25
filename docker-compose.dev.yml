@@ -1,0 +1,26 @@
+services:
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile.dev
+    ports:
+      - "${COLYSEUS_PORT:-2567}:2567"
+    volumes:
+      - ./server/src:/app/server/src
+      - ./shared/src:/app/shared/src
+    command: npm run dev -w @spherio/server
+
+  client:
+    build:
+      context: .
+      dockerfile: client/Dockerfile.dev
+    ports:
+      - "${CLIENT_PORT:-8080}:5173"
+    environment:
+      VITE_COLYSEUS_ENDPOINT: "ws://localhost:${CLIENT_PORT:-8080}/colyseus"
+      VITE_PROXY_TARGET: "http://server:2567"
+    volumes:
+      - ./client/src:/app/client/src
+      - ./client/index.html:/app/client/index.html
+      - ./shared/src:/app/shared/src
+    command: npm run dev -w @spherio/client -- --host 0.0.0.0 --port 5173

@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Spherio</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="overlay">
+      <div id="menu" class="panel">
+        <h1>Spherio</h1>
+        <p>3D agar.io — катись, ешь, расти</p>
+        <input id="nick" type="text" maxlength="16" placeholder="Никнейм" />
+        <button id="play-btn" type="button">Играть</button>
+        <p class="hint">WASD — движение · Пробел — тормоз</p>
+      </div>
+      <div id="hud" class="panel hidden">
+        <div id="hud-name"></div>
+        <div id="hud-stats"></div>
+        <div id="hud-leader"></div>
+        <div id="hud-ping"></div>
+      </div>
+      <div id="status"></div>
+    </div>
+    <canvas id="renderCanvas"></canvas>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,10 @@
+{
+  "name": "spherio",
+  "private": true,
+  "workspaces": ["shared", "client", "server"],
+  "scripts": {
+    "build": "npm run build -w @spherio/shared && npm run build -w @spherio/server && npm run build -w @spherio/client",
+    "dev:server": "npm run dev -w @spherio/server",
+    "dev:client": "npm run dev -w @spherio/client"
+  }
+}
