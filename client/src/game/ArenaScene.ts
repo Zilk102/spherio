@@ -1,13 +1,20 @@
 import {
   Color3,
   Color4,
+  DynamicTexture,
   HemisphericLight,
   MeshBuilder,
   StandardMaterial,
+  Texture,
   Vector3,
   type Scene,
 } from "@babylonjs/core";
 import { ARENA_HALF, ARENA_SIZE } from "@spherio/shared";
+import {
+  GROUND_TEX_SIZE,
+  GROUND_TEX_VERSION,
+  paintAsphaltTexture,
+} from "./groundTexture.js";
 
 export function buildArena(scene: Scene): void {
   scene.clearColor = new Color4(0.06, 0.1, 0.14, 1);
@@ -23,23 +30,28 @@ export function buildArena(scene: Scene): void {
     scene,
   );
   const groundMat = new StandardMaterial("groundMat", scene);
-  groundMat.diffuseColor = new Color3(0.2, 0.32, 0.26);
-  groundMat.specularColor = new Color3(0.02, 0.02, 0.02);
-  groundMat.specularPower = 4;
-  ground.material = groundMat;
-
-  const grid = MeshBuilder.CreateGround(
-    "grid",
-    { width: ARENA_SIZE, height: ARENA_SIZE, subdivisions: 24 },
+  const asphaltTex = new DynamicTexture(
+    `asphalt_v${GROUND_TEX_VERSION}`,
+    GROUND_TEX_SIZE,
     scene,
+    true,
+    Texture.TRILINEAR_SAMPLINGMODE,
   );
-  const gridMat = new StandardMaterial("gridMat", scene);
-  gridMat.wireframe = true;
-  gridMat.alpha = 0.12;
-  gridMat.diffuseColor = new Color3(0.45, 0.7, 0.55);
-  gridMat.specularColor = Color3.Black();
-  grid.material = gridMat;
-  grid.position.y = 0.01;
+  asphaltTex.wrapU = Texture.WRAP_ADDRESSMODE;
+  asphaltTex.wrapV = Texture.WRAP_ADDRESSMODE;
+  asphaltTex.anisotropicFilteringLevel = 8;
+  // тайлим текстуру так, чтобы один кафель ≈ 6 метров —
+  // мелкое зерно щебня различимо вблизи и сливается вдали
+  const tileMeters = 6;
+  asphaltTex.uScale = ARENA_SIZE / tileMeters;
+  asphaltTex.vScale = ARENA_SIZE / tileMeters;
+  const ctx = asphaltTex.getContext() as CanvasRenderingContext2D;
+  ctx.putImageData(paintAsphaltTexture(GROUND_TEX_SIZE), 0, 0);
+  asphaltTex.update();
+  groundMat.diffuseTexture = asphaltTex;
+  groundMat.specularColor = new Color3(0.03, 0.03, 0.04);
+  groundMat.specularPower = 32;
+  ground.material = groundMat;
 
   const wallMat = new StandardMaterial("wallMat", scene);
   wallMat.diffuseColor = new Color3(0.22, 0.32, 0.42);
