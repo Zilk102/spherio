@@ -8,6 +8,7 @@ import {
 import type { InputMessage } from "@spherio/shared";
 import type { PhysicsWorld, PlayerBody } from "./PhysicsWorld.js";
 import { PelletManager, type PelletData } from "./PelletManager.js";
+import type { HedgehogData } from "./HedgehogManager.js";
 
 /** Лукап цели бота из ArenaState. Возвращает id и radius цели, либо null. */
 export type TargetLookup = (botId: string) => { id: string; radius: number } | null;
@@ -147,6 +148,7 @@ export class BotAI {
     invuln: Map<string, number>,
     dtSec: number,
     getTarget?: TargetLookup,
+    hedgehogs: HedgehogData[] = [],
   ): InputMessage {
     const bot = physics.getPlayer(botId);
     if (!bot) return { moveX: 0, moveZ: 0, brake: false };
@@ -388,6 +390,31 @@ export class BotAI {
       const cl = Math.hypot(cx, cz) || 1;
       dx += (cx / cl) * 5 + Math.cos(mem.roamAngle) * 2;
       dz += (cz / cl) * 5 + Math.sin(mem.roamAngle) * 2;
+    }
+
+    // Ёжи-шары: уклоняемся заранее.
+    for (const h of hedgehogs) {
+      const hdx = h.x - pos.x;
+      const hdz = h.z - pos.z;
+      const hd = Math.hypot(hdx, hdz);
+      const avoidR = h.radius + br + 10;
+      if (hd < avoidR && hd > 0.05) {
+        const prox = 1 - hd / avoidR;
+        const fleeW = 7 + prox * 9;
+        dx -= (hdx / hd) * fleeW;
+        dz -= (hdz / hd) * fleeW;
+        if (hd < h.radius + br + 3 && myMass > tuning.boostMassFloor) {
+          if (Math.random() < tuning.boostAppetite * 0.85 && now - mem.lastBoostMs > 900) {
+            boost = true;
+            mem.lastBoostMs = now;
+          }
+        }
+        if (hd < h.radius + br + 5) {
+          brakeOverride = true;
+        }
+        mem.targetId = "";
+        mem.targetUntil = 0;
+      }
     }
 
     // Brake: если впереди стена в 1.2 секундах хода — тормозим.

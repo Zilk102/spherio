@@ -65,9 +65,12 @@ export class MatchEndOverlay {
       `15 минут истекло · длительность ${formatDuration(data.durationSec)}`,
     );
 
-    const me = data.rows.find((r) => r.sessionId && data.you && r.sessionId === data.you);
+    const meIdx = data.rows.findIndex(
+      (r) => r.sessionId && data.you && r.sessionId === data.you,
+    );
+    const me = meIdx >= 0 ? data.rows[meIdx] : undefined;
     if (me) {
-      const rank = data.rows.findIndex((r) => r.id === me.id) + 1;
+      const rank = meIdx + 1;
       this.setText("match-end-score", String(me.score));
       this.setText(
         "match-end-detail",

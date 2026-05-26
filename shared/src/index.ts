@@ -1,5 +1,7 @@
 export * from "./branding.js";
+export * from "./playerOwner.js";
 export * from "./constants.js";
+export * from "./pellets.js";
 export * from "./physics.js";
 export * from "./kinematicStep.js";
 export * from "./messages.js";

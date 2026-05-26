@@ -2,13 +2,19 @@ import { Client, Room } from "@colyseus/core";
 import {
   ARENA_HALF,
   BOT_COUNT,
+  DEATH_SCATTER_FRACTION,
+  GROUND_Y,
   MATCH_DURATION_MS,
   MATCH_END_HOLD_MS,
   MIN_RADIUS,
   PLAYER_COLORS,
+  RESPAWN_INVULN_MS,
   TICK_DT,
   TICK_RATE,
   listFreeSkins,
+  massFromRadius,
+  playerOwnerKey,
+  radiusFromMass,
   randomBotAppearance,
   scoreFromRadius,
 } from "@spherio/shared";
@@ -27,13 +33,24 @@ import { filterChatText } from "../services/chatFilter.js";
 import { recordMatchEnd } from "../services/stats.js";
 import { submitScore } from "../services/leaderboard.js";
 import { colorForSkin, resolveSkinForJoin } from "../util/playerSkin.js";
-import { ArenaState, PelletState, PlayerState } from "../schema/ArenaState.js";
+import {
+  ArenaState,
+  HedgehogState,
+  PelletState,
+  PlayerState,
+} from "../schema/ArenaState.js";
 import { PhysicsWorld } from "../game/PhysicsWorld.js";
-import { PelletManager } from "../game/PelletManager.js";
+import { PelletManager, type PelletData } from "../game/PelletManager.js";
+import { HedgehogManager, type HedgehogVictimHit } from "../game/HedgehogManager.js";
 import { EatResolver } from "../game/EatResolver.js";
 import { BotAI } from "../game/BotAI.js";
 import { TargetSystem } from "../game/TargetSystem.js";
 import { trySplit, type SplitContext } from "../game/split.js";
+import {
+  applySplitRejoinPull,
+  clearSplitContactForPart,
+  resolveSplitMerges,
+} from "../game/splitRejoin.js";
 import { randomBotName } from "../game/botNames.js";
 import { PelletManager as PelletUtil } from "../game/PelletManager.js";
 import { InputRateLimiter } from "../game/rateLimit.js";
@@ -70,7 +87,8 @@ export class ArenaRoom extends Room<ArenaState> {
 
   private physics!: PhysicsWorld;
   private pellets = new PelletManager();
-  private pelletData = new Map<string, { id: string; x: number; y: number; z: number }>();
+  private pelletData = new Map<string, PelletData>();
+  private hedgehogs = new HedgehogManager();
   private eatResolver = new EatResolver();
   private rateLimiter = new InputRateLimiter();
   private invuln = new Map<string, number>();
@@ -89,6 +107,8 @@ export class ArenaRoom extends Room<ArenaState> {
   private clientBySession = new Map<string, Client>();
   private splitCooldownUntil = new Map<string, number>();
   private lastSplitAttemptMs = new Map<string, number>();
+  /** Время (ms), когда пара частей впервые соприкоснулась в этом контакте. */
+  private splitContactSince = new Map<string, number>();
 
   async onCreate(): Promise<void> {
     this.setState(new ArenaState());
@@ -100,7 +120,9 @@ export class ArenaRoom extends Room<ArenaState> {
     for (const p of this.pellets.fill()) {
       this.pelletData.set(p.id, p);
     }
+    this.hedgehogs.fill();
     this.syncPellets();
+    this.syncHedgehogs();
 
     if (this.enableBots) {
       for (let i = 0; i < BOT_COUNT; i++) {
@@ -175,7 +197,7 @@ export class ArenaRoom extends Room<ArenaState> {
         return;
       }
 
-      this.targetSystem.onPlayerSpawned(result.childId, this.state, now, this.invuln);
+      this.targetSystem.onSplitPartSpawned(result.childId, this.state, now, this.invuln);
 
       try {
         client.send("split_result", { ok: true, childId: result.childId });
@@ -323,11 +345,7 @@ export class ArenaRoom extends Room<ArenaState> {
 
   /** Текущее число «живых» (не-бот) сессий в комнате (с учётом потерянных, но в reconnect-окне). */
   protected humanCount(): number {
-    let n = 0;
-    for (const ps of this.state.players.values()) {
-      if (!ps.isBot) n++;
-    }
-    return n;
+    return this.countHumanOwners();
   }
 
   /** Пишет актуальные данные в Colyseus metadata — клиент-матчмейкер опирается на них. */
@@ -409,22 +427,43 @@ export class ArenaRoom extends Room<ArenaState> {
     }, MATCH_END_HOLD_MS);
   }
 
-  /** Собрать топ всех игроков (включая ботов) по radius. */
+  /** Собрать топ: одна строка на игрока/бота (split-части суммируются по массе). */
   protected buildLeaderboard(): MatchLeaderboardRow[] {
-    const items: MatchLeaderboardRow[] = [];
-    // sessionId → playerId, чтобы маркировать «себя» на клиенте
-    const sidByPlayer = new Map<string, string>();
-    for (const [sid, parts] of this.sessionParts) {
-      for (const partId of parts) sidByPlayer.set(partId, sid);
-    }
+    const grouped = new Map<
+      string,
+      {
+        name: string;
+        isBot: boolean;
+        sessionId?: string;
+        totalMass: number;
+      }
+    >();
+
     for (const [id, ps] of this.state.players) {
+      const ownerKey = ps.isBot ? id : playerOwnerKey(id);
+      let row = grouped.get(ownerKey);
+      if (!row) {
+        row = {
+          name: ps.name || (ps.isBot ? "Бот" : "Игрок"),
+          isBot: !!ps.isBot,
+          sessionId: ps.isBot ? undefined : ownerKey,
+          totalMass: 0,
+        };
+        grouped.set(ownerKey, row);
+      }
+      row.totalMass += massFromRadius(ps.radius);
+    }
+
+    const items: MatchLeaderboardRow[] = [];
+    for (const [ownerKey, row] of grouped) {
+      const radius = radiusFromMass(row.totalMass);
       items.push({
-        id,
-        name: ps.name || (ps.isBot ? "Бот" : "Игрок"),
-        score: scoreFromRadius(ps.radius),
-        radius: ps.radius,
-        isBot: !!ps.isBot,
-        sessionId: sidByPlayer.get(id),
+        id: ownerKey,
+        name: row.name,
+        score: scoreFromRadius(radius),
+        radius,
+        isBot: row.isBot,
+        sessionId: row.sessionId,
       });
     }
     items.sort((a, b) => b.score - a.score);
@@ -443,11 +482,12 @@ export class ArenaRoom extends Room<ArenaState> {
     if (parts.length > 0 && meta && !meta.isBot) {
       const primary = this.state.players.get(meta.playerId);
       if (primary) {
-        let bestR = primary.radius;
+        let totalMass = 0;
         for (const partId of parts) {
           const b = this.physics.getPlayer(partId);
-          if (b && b.radius > bestR) bestR = b.radius;
+          if (b) totalMass += b.mass;
         }
+        const bestR = radiusFromMass(totalMass);
         const st = stats ?? {
           kills: 0,
           deaths: 0,
@@ -457,7 +497,7 @@ export class ArenaRoom extends Room<ArenaState> {
         st.bestRadius = bestR;
         const timeSec = Math.max(1, Math.floor((Date.now() - st.startMs) / 1000));
         const score = scoreFromRadius(bestR);
-        const humanCount = [...this.state.players.values()].filter((p) => !p.isBot).length;
+        const humanCount = this.countHumanOwners();
         const rank = this.estimateRank(bestR);
 
         // Глобальный топ/ежедневный/долгосрочные user_stats пишем ТОЛЬКО из публичных матчей.
@@ -481,6 +521,7 @@ export class ArenaRoom extends Room<ArenaState> {
         }
       }
       for (const partId of parts) {
+        clearSplitContactForPart(this.splitContactSince, partId);
         this.physics.removePlayer(partId);
         this.state.players.delete(partId);
         this.invuln.delete(partId);
@@ -519,10 +560,23 @@ export class ArenaRoom extends Room<ArenaState> {
     }
   }
 
+  private countHumanOwners(): number {
+    const owners = new Set<string>();
+    for (const ps of this.state.players.values()) {
+      if (!ps.isBot) owners.add(playerOwnerKey(ps.id));
+    }
+    return owners.size;
+  }
+
   private estimateRank(radius: number): number {
-    const scores = [...this.state.players.values()]
-      .filter((p) => !p.isBot)
-      .map((p) => p.radius)
+    const grouped = new Map<string, number>();
+    for (const ps of this.state.players.values()) {
+      if (ps.isBot) continue;
+      const key = playerOwnerKey(ps.id);
+      grouped.set(key, (grouped.get(key) ?? 0) + massFromRadius(ps.radius));
+    }
+    const scores = [...grouped.values()]
+      .map((m) => radiusFromMass(m))
       .sort((a, b) => b - a);
     const idx = scores.findIndex((r) => r <= radius);
     return idx < 0 ? scores.length : idx + 1;
@@ -609,15 +663,43 @@ export class ArenaRoom extends Room<ArenaState> {
           this.invuln,
           dt,
           getTargetForBot,
+          this.hedgehogs.getAll(),
         ),
       );
     }
 
+    applySplitRejoinPull(this.physics, this.sessionParts, dt);
     this.physics.step(dt);
     applyBoostMassDrain(this.physics, this.sessionParts, dt);
+
+    const mergeEvents = resolveSplitMerges(
+      this.physics,
+      this.state,
+      this.sessionParts,
+      this.splitContactSince,
+      nowMs,
+    );
+    for (const m of mergeEvents) {
+      clearSplitContactForPart(this.splitContactSince, m.removedId);
+      this.targetSystem.onPlayerRemoved(m.removedId, this.state, nowMs, this.invuln);
+      const st = this.sessionStats.get(m.sessionId);
+      if (st) st.bestRadius = Math.max(st.bestRadius, m.newRadius);
+    }
     this.nudgeStuckBots();
     enforceSpeedLimits(this.physics.getAllPlayers());
     const now = nowMs;
+
+    this.hedgehogs.step(dt);
+    const hedgehogHits = this.hedgehogs.checkCollisions(
+      this.physics,
+      this.invuln,
+      now,
+    );
+    let pelletsDirty = false;
+    for (const hit of hedgehogHits) {
+      if (this.shatterPlayerOnHedgehog(hit, now)) pelletsDirty = true;
+    }
+
     const events = this.eatResolver.resolve(
       this.physics,
       this.state,
@@ -630,6 +712,7 @@ export class ArenaRoom extends Room<ArenaState> {
     for (const e of events.pelletEaten) {
       const respawned = this.pellets.respawn(e.pelletId);
       this.pelletData.set(e.pelletId, respawned);
+      pelletsDirty = true;
       const killerSession = this.findSessionByPart(e.eaterId);
       if (killerSession) {
         const st = this.sessionStats.get(killerSession);
@@ -638,6 +721,7 @@ export class ArenaRoom extends Room<ArenaState> {
     }
 
     for (const e of events.playerEaten) {
+      clearSplitContactForPart(this.splitContactSince, e.victimId);
       PelletUtil.scatterDeathLoot(
         e.victimX,
         e.victimZ,
@@ -645,6 +729,7 @@ export class ArenaRoom extends Room<ArenaState> {
         e.scatterMass,
         this.pelletData,
       );
+      pelletsDirty = true;
       pushKillFeed(this.state, e.killerName, e.victimName, now);
 
       // Цели: убитого как цель убрать у всех, у кого она стояла; убийце — новую цель.
@@ -691,9 +776,8 @@ export class ArenaRoom extends Room<ArenaState> {
     this.targetSystem.tick(this.state, now, this.invuln);
 
     this.syncPlayers(now);
-    if (events.pelletEaten.length > 0 || events.playerEaten.length > 0) {
-      this.syncPellets();
-    }
+    if (pelletsDirty) this.syncPellets();
+    this.syncHedgehogs(now);
   }
 
   private nudgeStuckBots(): void {
@@ -747,7 +831,106 @@ export class ArenaRoom extends Room<ArenaState> {
       s.x = p.x;
       s.y = p.y;
       s.z = p.z;
+      s.kind = p.kind;
       this.state.pellets.push(s);
+    }
+  }
+
+  /**
+   * Столкновение с ежом: рассыпается шар игрока/бота, еж продолжает катиться.
+   */
+  private shatterPlayerOnHedgehog(hit: HedgehogVictimHit, now: number): boolean {
+    const victim = this.physics.getPlayer(hit.victimId);
+    if (!victim) return false;
+    if ((this.invuln.get(hit.victimId) ?? 0) > now) return false;
+
+    const vPos = victim.body.translation();
+    const victimMass = massFromRadius(victim.radius);
+    const scatterMass = victimMass * DEATH_SCATTER_FRACTION;
+
+    const victimPs = this.state.players.get(hit.victimId);
+    const victimName = victimPs?.name ?? hit.victimId;
+    const victimColor = victimPs?.color ?? 0xffffff;
+    const victimSkin = victimPs?.skinId ?? "emoji_grin";
+    const victimIsBot = victimPs?.isBot ?? false;
+
+    PelletUtil.scatterDeathLoot(
+      vPos.x,
+      vPos.z,
+      victim.radius,
+      scatterMass,
+      this.pelletData,
+    );
+    pushKillFeed(this.state, "Ёж-шар", victimName, now);
+
+    const ownerId = victim.ownerId;
+    const parts = this.sessionParts.get(ownerId);
+    const partList = parts ?? [hit.victimId];
+    const removedPartOnly = partList.length > 1;
+
+    if (parts) {
+      const partIdx = parts.indexOf(hit.victimId);
+      if (partIdx >= 0) parts.splice(partIdx, 1);
+    }
+
+    clearSplitContactForPart(this.splitContactSince, hit.victimId);
+    this.physics.removePlayer(hit.victimId);
+    this.state.players.delete(hit.victimId);
+    this.invuln.delete(hit.victimId);
+    this.targetSystem.onPlayerRemoved(hit.victimId, this.state, now, this.invuln);
+
+    if (removedPartOnly) {
+      return true;
+    }
+
+    const margin = 3;
+    const rx = (Math.random() * 2 - 1) * (ARENA_HALF - margin);
+    const rz = (Math.random() * 2 - 1) * (ARENA_HALF - margin);
+    const respawnId = ownerId;
+    this.physics.addPlayer(respawnId, MIN_RADIUS, rx, rz, ownerId);
+    if (parts) {
+      parts.length = 0;
+      parts.push(respawnId);
+    }
+
+    const row = new PlayerState();
+    row.id = respawnId;
+    row.name = victimName;
+    row.color = victimColor;
+    row.skinId = victimSkin;
+    row.isBot = victimIsBot;
+    row.radius = MIN_RADIUS;
+    row.x = rx;
+    row.z = rz;
+    this.state.players.set(respawnId, row);
+
+    this.invuln.set(respawnId, now + RESPAWN_INVULN_MS);
+    this.targetSystem.onPlayerSpawned(respawnId, this.state, now, this.invuln);
+
+    const victimSession = this.findSessionByPart(ownerId);
+    if (victimSession) {
+      const st = this.sessionStats.get(victimSession);
+      if (st) st.deaths += 1;
+    }
+
+    return true;
+  }
+
+  private syncHedgehogs(nowMs = Date.now()): void {
+    this.state.hedgehogs.clear();
+    for (const h of this.hedgehogs.getAll()) {
+      const s = new HedgehogState();
+      s.id = h.id;
+      s.x = h.x;
+      s.y = GROUND_Y + h.radius;
+      s.z = h.z;
+      s.radius = h.radius;
+      const q = HedgehogManager.visualRotation(h, nowMs);
+      s.qx = q.qx;
+      s.qy = q.qy;
+      s.qz = q.qz;
+      s.qw = q.qw;
+      this.state.hedgehogs.push(s);
     }
   }
 }

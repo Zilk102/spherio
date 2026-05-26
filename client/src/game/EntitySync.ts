@@ -11,7 +11,12 @@ import {
   Vector3,
   type Scene,
 } from "@babylonjs/core";
-import { GROUND_Y, PELLET_RADIUS } from "@spherio/shared";
+import {
+  GROUND_Y,
+  pelletRadiusForKind,
+  PelletKind,
+} from "@spherio/shared";
+import { createHedgehogMesh } from "./hedgehogMesh.js";
 import { attachSkinDecal, disposeSkinMaterials, getSphereBaseMaterial } from "./skinTextures.js";
 import { isLocalPart } from "../lib/playerParts.js";
 import type { LocalPredictor } from "./LocalPredictor.js";
@@ -37,6 +42,19 @@ interface PelletSnap {
   x: number;
   y: number;
   z: number;
+  kind?: number;
+}
+
+interface HedgehogSnap {
+  id: string;
+  x: number;
+  y: number;
+  z: number;
+  radius: number;
+  qx: number;
+  qy: number;
+  qz: number;
+  qw: number;
 }
 
 interface SmoothState {
@@ -72,6 +90,8 @@ export class EntitySync {
   private labels = new Map<string, Mesh>();
   private labelTextures = new Map<string, DynamicTexture>();
   private pellets = new Map<string, Mesh>();
+  private pelletMats = new Map<PelletKind, StandardMaterial>();
+  private hedgehogs = new Map<string, TransformNode>();
   private playerMatKeys = new Map<string, string>();
   private shadowMat: StandardMaterial;
   private targetIndicator: TransformNode | null = null;
@@ -101,6 +121,23 @@ export class EntitySync {
     this.shadowMat.disableDepthWrite = true;
     this.shadowMat.transparencyMode = Material.MATERIAL_ALPHABLEND;
     this.shadowMat.zOffset = -8;
+
+    this.pelletMats.set(PelletKind.Green, this.makePelletMat("green", 0.35, 0.82, 0.48));
+    this.pelletMats.set(PelletKind.Blue, this.makePelletMat("blue", 0.28, 0.55, 0.95));
+    this.pelletMats.set(PelletKind.Red, this.makePelletMat("red", 0.92, 0.32, 0.28));
+  }
+
+  private makePelletMat(
+    name: string,
+    r: number,
+    g: number,
+    b: number,
+  ): StandardMaterial {
+    const m = new StandardMaterial(`pelletKind_${name}`, this.scene);
+    m.diffuseColor = new Color3(r, g, b);
+    m.emissiveColor = new Color3(r * 0.2, g * 0.2, b * 0.2);
+    m.specularColor = Color3.Black();
+    return m;
   }
 
   /**
@@ -496,26 +533,51 @@ export class EntitySync {
     const seen = new Set<string>();
     for (const p of list) {
       seen.add(p.id);
+      const kind = (p.kind ?? PelletKind.Green) as PelletKind;
+      const pr = pelletRadiusForKind(kind);
       let node = this.pellets.get(p.id);
       if (!node) {
         node = MeshBuilder.CreateSphere(
           `pellet_${p.id}`,
-          { diameter: PELLET_RADIUS * 2, segments: 8 },
+          { diameter: pr * 2, segments: 10 },
           this.scene,
         );
-        const m = new StandardMaterial(`pellet_${p.id}`, this.scene);
-        m.diffuseColor = new Color3(0.35, 0.82, 0.48);
-        m.emissiveColor = new Color3(0.06, 0.14, 0.08);
-        m.specularColor = Color3.Black();
-        node.material = m;
         this.pellets.set(p.id, node);
       }
-      node.position.set(p.x, p.y ?? GROUND_Y + PELLET_RADIUS, p.z);
+      const mat = this.pelletMats.get(kind) ?? this.pelletMats.get(PelletKind.Green)!;
+      node.material = mat;
+      const scale = pr / pelletRadiusForKind(PelletKind.Green);
+      node.scaling.set(scale, scale, scale);
+      node.position.set(p.x, p.y ?? GROUND_Y + pr, p.z);
     }
     for (const [id, node] of this.pellets) {
       if (!seen.has(id)) {
         node.dispose();
         this.pellets.delete(id);
+      }
+    }
+  }
+
+  syncHedgehogs(list: HedgehogSnap[]): void {
+    const seen = new Set<string>();
+    for (const h of list) {
+      seen.add(h.id);
+      let root = this.hedgehogs.get(h.id);
+      if (!root) {
+        root = createHedgehogMesh(this.scene, h.id, h.radius);
+        this.hedgehogs.set(h.id, root);
+      }
+      root.position.set(h.x, h.y, h.z);
+      if (root.rotationQuaternion) {
+        root.rotationQuaternion.set(h.qx, h.qy, h.qz, h.qw);
+      } else {
+        root.rotationQuaternion = new Quaternion(h.qx, h.qy, h.qz, h.qw);
+      }
+    }
+    for (const [id, root] of this.hedgehogs) {
+      if (!seen.has(id)) {
+        root.dispose(false, true);
+        this.hedgehogs.delete(id);
       }
     }
   }
@@ -598,6 +660,8 @@ export class EntitySync {
     for (const n of this.labels.values()) n.dispose();
     for (const t of this.labelTextures.values()) t.dispose();
     for (const n of this.pellets.values()) n.dispose();
+    for (const h of this.hedgehogs.values()) h.dispose(false, true);
+    for (const m of this.pelletMats.values()) m.dispose();
     this.shadowMat.dispose();
     this.targetIndicator?.dispose();
     this.targetIndicatorMat?.dispose();
@@ -611,6 +675,8 @@ export class EntitySync {
     this.labels.clear();
     this.labelTextures.clear();
     this.pellets.clear();
+    this.hedgehogs.clear();
+    this.pelletMats.clear();
     this.smooth.clear();
     this.history.clear();
   }

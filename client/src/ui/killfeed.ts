@@ -13,7 +13,10 @@ export class KillFeedUi {
   push(entries: KillFeedEntry[]): void {
     const now = Date.now();
     for (const e of entries) {
-      const key = `${e.at}-${e.killerName}-${e.victimName}`;
+      const key =
+        e.seq != null
+          ? `seq-${e.seq}`
+          : `${e.at}-${e.killerName}-${e.victimName}`;
       if (this.seen.has(key)) continue;
       this.seen.add(key);
       if (this.seen.size > 40) {

@@ -4,7 +4,6 @@ import {
   EAT_RATIO,
   KILL_ABSORB_FRACTION,
   MIN_RADIUS,
-  PELLET_RADIUS,
   RESPAWN_INVULN_MS,
   TARGET_BONUS_MULT,
 } from "@spherio/shared";
@@ -59,7 +58,8 @@ export class EatResolver {
         const dx = pellet.x - pos.x;
         const dz = pellet.z - pos.z;
         const dist = Math.hypot(dx, dz);
-        if (dist < er + PELLET_RADIUS) {
+        const pr = PelletManager.radiusFor(pellet);
+        if (dist < er + pr) {
           const newRadius = PelletManager.applyMassGain(
             er,
             PelletManager.massGainFor(pellet),

@@ -30,17 +30,33 @@ export class PelletState extends Schema {
   @type("number") x = 0;
   @type("number") y = 0.15;
   @type("number") z = 0;
+  /** 0 зелёный, 1 синий, 2 красный */
+  @type("uint8") kind = 0;
+}
+
+export class HedgehogState extends Schema {
+  @type("string") id = "";
+  @type("number") x = 0;
+  @type("number") y = 0.5;
+  @type("number") z = 0;
+  @type("number") radius = 1.05;
+  @type("number") qx = 0;
+  @type("number") qy = 0;
+  @type("number") qz = 0;
+  @type("number") qw = 1;
 }
 
 export class KillFeedEntryState extends Schema {
   @type("string") killerName = "";
   @type("string") victimName = "";
   @type("number") at = 0;
+  @type("uint32") seq = 0;
 }
 
 export class ArenaState extends Schema {
   @type({ map: PlayerState }) players = new MapSchema<PlayerState>();
   @type([PelletState]) pellets = new ArraySchema<PelletState>();
+  @type([HedgehogState]) hedgehogs = new ArraySchema<HedgehogState>();
   @type([KillFeedEntryState]) killFeed = new ArraySchema<KillFeedEntryState>();
   /** Серверное время старта матча (ms epoch). 0 — не запущен. */
   @type("number") matchStartedAt = 0;

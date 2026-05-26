@@ -3,7 +3,9 @@ import { massFromRadius, radiusFromMass } from "@spherio/shared";
 import type { PhysicsWorld } from "./PhysicsWorld.js";
 import { ArenaState, KillFeedEntryState } from "../schema/ArenaState.js";
 
-export const KILL_FEED_MAX = 8;
+export const KILL_FEED_MAX = 16;
+
+let killFeedSeq = 0;
 
 export function handleBoost(
   physics: PhysicsWorld,
@@ -52,6 +54,7 @@ export function pushKillFeed(
   row.killerName = killerName;
   row.victimName = victimName;
   row.at = at;
+  row.seq = ++killFeedSeq;
   state.killFeed.push(row);
   while (state.killFeed.length > KILL_FEED_MAX) {
     state.killFeed.shift();

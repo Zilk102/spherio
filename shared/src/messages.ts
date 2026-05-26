@@ -24,6 +24,7 @@ export interface KillFeedEntry {
   killerName: string;
   victimName: string;
   at: number;
+  seq?: number;
 }
 
 export interface ChatMessage {

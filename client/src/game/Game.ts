@@ -71,7 +71,7 @@ export class Game {
   private playerName = "Игрок";
   private lastState: ArenaState | null = null;
   private hadLocalPart = false;
-  private killFeedSeen = 0;
+  private killFeedLastSeq = 0;
   private spectating = false;
   private intentionalLeave = false;
   private menuOpen = false;
@@ -181,10 +181,51 @@ export class Game {
           this.predictor.prune(seen, this.localId);
           this.predictor.simulate(dtSec);
 
-          const pellets: { id: string; x: number; y: number; z: number }[] = [];
+          const pellets: {
+            id: string;
+            x: number;
+            y: number;
+            z: number;
+            kind: number;
+          }[] = [];
           for (let i = 0; i < state.pellets.length; i++) {
             const p = state.pellets[i];
-            pellets.push({ id: p.id, x: p.x, y: p.y, z: p.z });
+            pellets.push({
+              id: p.id,
+              x: p.x,
+              y: p.y,
+              z: p.z,
+              kind: typeof p.kind === "number" ? p.kind : 0,
+            });
+          }
+
+          const hedgehogs: {
+            id: string;
+            x: number;
+            y: number;
+            z: number;
+            radius: number;
+            qx: number;
+            qy: number;
+            qz: number;
+            qw: number;
+          }[] = [];
+          const hh = state.hedgehogs;
+          if (hh) {
+            for (let i = 0; i < hh.length; i++) {
+              const h = hh[i];
+              hedgehogs.push({
+                id: h.id,
+                x: h.x,
+                y: h.y,
+                z: h.z,
+                radius: typeof h.radius === "number" ? h.radius : 1.05,
+                qx: h.qx,
+                qy: h.qy,
+                qz: h.qz,
+                qw: h.qw,
+              });
+            }
           }
 
           const me = pickLargestLocalPart(players, this.localId);
@@ -208,6 +249,7 @@ export class Game {
             ping,
           );
           this.entities.syncPellets(pellets);
+          this.entities.syncHedgehogs(hedgehogs);
 
           const localBrake = !this.menuOpen && this.input.brake;
           this.skidMarks.update(
@@ -250,15 +292,23 @@ export class Game {
           const feed: KillFeedEntry[] = [];
           for (let i = 0; i < state.killFeed.length; i++) {
             const e = state.killFeed[i];
-            feed.push({
-              killerName: e.killerName,
-              victimName: e.victimName,
-              at: e.at,
-            });
+            const seq = typeof e.seq === "number" ? e.seq : 0;
+            if (seq > this.killFeedLastSeq) {
+              feed.push({
+                killerName: e.killerName,
+                victimName: e.victimName,
+                at: e.at,
+                seq,
+              });
+            }
           }
-          if (feed.length > this.killFeedSeen) {
-            this.killFeed.push(feed.slice(this.killFeedSeen));
-            this.killFeedSeen = feed.length;
+          if (feed.length > 0) {
+            feed.sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
+            this.killFeed.push(feed);
+            this.killFeedLastSeq = Math.max(
+              this.killFeedLastSeq,
+              ...feed.map((e) => e.seq ?? 0),
+            );
           }
 
           updateHud(
@@ -288,9 +338,10 @@ export class Game {
           // Цель локального игрока + 3D-индикатор и HUD-строка.
           const localTargetId = me?.targetId ?? "";
           const localTargetExpires = me?.targetExpiresAt ?? 0;
-          const targetSnap = localTargetId
-            ? players.find((p) => p.id === localTargetId)
-            : undefined;
+          const targetSnap =
+            localTargetId && !isLocalPart(localTargetId, this.localId)
+              ? players.find((p) => p.id === localTargetId)
+              : undefined;
           this.entities.updateTargetIndicator(
             targetSnap ? targetSnap.id : null,
             now,
@@ -339,6 +390,7 @@ export class Game {
   dispose(): void {
     this.engine.stopRenderLoop();
     this.killFeed.clear();
+    this.killFeedLastSeq = 0;
     this.matchEnd.hide();
     this.death.hide();
     this.entities.dispose();

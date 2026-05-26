@@ -3,8 +3,10 @@ import {
   GROUND_Y,
   MAX_DEATH_SCATTER_PELLETS,
   PELLET_COUNT,
-  PELLET_MASS_VALUE,
-  PELLET_RADIUS,
+  pelletMassForKind,
+  pelletRadiusForKind,
+  PelletKind,
+  pickRandomPelletKind,
 } from "@spherio/shared";
 import { radiusFromMass, massFromRadius } from "@spherio/shared";
 
@@ -13,7 +15,8 @@ export interface PelletData {
   x: number;
   y: number;
   z: number;
-  /** Масса при поедании (орбы с трупа — крупнее обычных). */
+  kind: PelletKind;
+  /** Масса при поедании (орбы с трупа / ежа — переопределение). */
   massValue?: number;
 }
 
@@ -30,13 +33,15 @@ export class PelletManager {
     return [...this.pellets.values()];
   }
 
-  private spawnOne(): PelletData {
+  private spawnOne(kind = pickRandomPelletKind()): PelletData {
     const margin = 2;
     const id = `p${this.nextId++}`;
+    const r = pelletRadiusForKind(kind);
     const pellet: PelletData = {
       id,
+      kind,
       x: (Math.random() * 2 - 1) * (ARENA_HALF - margin),
-      y: GROUND_Y + PELLET_RADIUS,
+      y: GROUND_Y + r,
       z: (Math.random() * 2 - 1) * (ARENA_HALF - margin),
     };
     return pellet;
@@ -55,7 +60,7 @@ export class PelletManager {
   }
 
   static pelletMassGain(): number {
-    return PELLET_MASS_VALUE;
+    return pelletMassForKind(PelletKind.Green);
   }
 
   static applyMassGain(currentRadius: number, gain: number): number {
@@ -64,7 +69,11 @@ export class PelletManager {
   }
 
   static massGainFor(pellet: PelletData): number {
-    return pellet.massValue ?? PELLET_MASS_VALUE;
+    return pellet.massValue ?? pelletMassForKind(pellet.kind);
+  }
+
+  static radiusFor(pellet: PelletData): number {
+    return pelletRadiusForKind(pellet.kind);
   }
 
   /**
@@ -77,12 +86,13 @@ export class PelletManager {
     victimRadius: number,
     totalMass: number,
     data: Map<string, PelletData>,
+    maxPellets = MAX_DEATH_SCATTER_PELLETS,
   ): void {
     if (totalMass <= 1e-6 || data.size === 0) return;
 
     const count = Math.min(
-      Math.max(6, Math.ceil(totalMass / PELLET_MASS_VALUE)),
-      MAX_DEATH_SCATTER_PELLETS,
+      Math.max(6, Math.ceil(totalMass / pelletMassForKind(PelletKind.Green))),
+      maxPellets,
       data.size,
     );
     const massEach = totalMass / count;
@@ -104,10 +114,13 @@ export class PelletManager {
       z = Math.max(-ARENA_HALF + 2, Math.min(ARENA_HALF - 2, z));
 
       const id = ids[i]!;
+      const kind = PelletKind.Green;
+      const pr = pelletRadiusForKind(kind);
       data.set(id, {
         id,
+        kind,
         x,
-        y: GROUND_Y + PELLET_RADIUS,
+        y: GROUND_Y + pr,
         z,
         massValue: massEach,
       });

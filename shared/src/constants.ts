@@ -11,8 +11,23 @@ export const ARENA_SIZE = ARENA_HALF * 2;
 export const WALL_HEIGHT = 4;
 
 export const PELLET_COUNT = 400;
+/** @deprecated Используйте pelletRadiusForKind(PelletKind.Green) */
 export const PELLET_RADIUS = 0.15;
+/** @deprecated Используйте pelletMassForKind(PelletKind.Green) */
 export const PELLET_MASS_VALUE = 0.02;
+
+/** Шары-ежи на арене (не боты). */
+export const HEDGEHOG_COUNT_MIN = 5;
+export const HEDGEHOG_COUNT_MAX = 10;
+/** Базовый радиус (для обратной совместимости). */
+export const HEDGEHOG_RADIUS = 1.05;
+export const HEDGEHOG_RADIUS_MIN = 0.82;
+export const HEDGEHOG_RADIUS_MAX = 1.38;
+/** Масса, рассыпаемая при столкновении с игроком/ботом. */
+export const HEDGEHOG_SCATTER_MASS = 0.95;
+export const HEDGEHOG_SPEED_MIN = 0.8;
+export const HEDGEHOG_SPEED_MAX = 1.9;
+export const HEDGEHOG_SCATTER_PELLETS = 14;
 
 /** Доля массы жертвы, рассыпаемая орбами на месте убийства */
 export const DEATH_SCATTER_FRACTION = 0.88;
@@ -85,6 +100,10 @@ export const SPLIT_LAUNCH_IMPULSE = 14;
 export const SPLIT_COOLDOWN_MS = 2800;
 /** Максимум частей (сфер) на одного игрока. */
 export const MAX_SPLIT_PARTS = 4;
+/** Притяжение частей одной сессии друг к другу (м/с²). */
+export const SPLIT_REJOIN_PULL_ACCEL = 7.5;
+/** Сколько части должны соприкасаться перед слиянием (мс). */
+export const SPLIT_MERGE_CONTACT_MS = 1000;
 
 /** Кинетическое трение при «заблокированном» скольжении (м/с²). */
 export const SLIDE_FRICTION_DECEL = 6.8;

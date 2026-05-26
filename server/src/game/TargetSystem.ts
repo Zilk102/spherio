@@ -1,4 +1,8 @@
-import { TARGET_DURATION_MS } from "@spherio/shared";
+import {
+  TARGET_DURATION_MS,
+  isSamePlayerOwner,
+  playerOwnerKey,
+} from "@spherio/shared";
 import type { ArenaState, PlayerState } from "../schema/ArenaState.js";
 
 /**
@@ -7,6 +11,7 @@ import type { ArenaState, PlayerState } from "../schema/ArenaState.js";
  *  - перевыбирается при истечении таймера, исчезновении цели или после поедания.
  *
  * Цель сохраняется в `PlayerState.targetId` и синхронизируется на клиент через ArenaState.
+ * У частей одной сессии (split) цель общая.
  */
 export class TargetSystem {
   /** Текущая длительность цели, ms. Хранится отдельно, чтобы можно было менять в тестах. */
@@ -14,8 +19,7 @@ export class TargetSystem {
 
   /**
    * Назначить случайную цель указанному игроку. Возвращает id назначенной цели или "".
-   * Цели исключают самого игрока и игроков, которые сейчас в invuln-окне после респавна,
-   * чтобы стартовая цель не была неубиваемой.
+   * Цели исключают самого игрока, его split-части и игроков в invuln после респавна.
    */
   assignTargetFor(
     playerId: string,
@@ -26,8 +30,8 @@ export class TargetSystem {
     const candidates: string[] = [];
     for (const [id, ps] of state.players) {
       if (id === playerId) continue;
+      if (isSamePlayerOwner(id, playerId)) continue;
       if (!ps) continue;
-      // не выдаём цель, которая прямо сейчас неуязвима — обновится в следующем тике
       const inv = invuln.get(id) ?? 0;
       if (inv > now + 200) continue;
       candidates.push(id);
@@ -36,20 +40,19 @@ export class TargetSystem {
     if (!me) return "";
 
     if (candidates.length === 0) {
-      me.targetId = "";
-      me.targetExpiresAt = 0;
+      this.syncTargetToOwner(playerId, "", 0, state);
       return "";
     }
 
-    // По возможности новая цель не должна совпадать с предыдущей.
     let pick = candidates[Math.floor(Math.random() * candidates.length)];
     if (pick === me.targetId && candidates.length > 1) {
       while (pick === me.targetId) {
         pick = candidates[Math.floor(Math.random() * candidates.length)];
       }
     }
-    me.targetId = pick;
-    me.targetExpiresAt = now + this.durationMs;
+
+    const expiresAt = now + this.durationMs;
+    this.syncTargetToOwner(playerId, pick, expiresAt, state);
     return pick;
   }
 
@@ -59,7 +62,11 @@ export class TargetSystem {
    * Вызывается каждым tick'ом ArenaRoom.
    */
   tick(state: ArenaState, now: number, invuln: Map<string, number>): void {
+    const seenOwners = new Set<string>();
     for (const [pid, ps] of state.players) {
+      const owner = playerOwnerKey(pid);
+      if (seenOwners.has(owner)) continue;
+      seenOwners.add(owner);
       this.ensureTargetForPlayer(pid, ps, state, now, invuln);
     }
   }
@@ -81,7 +88,6 @@ export class TargetSystem {
     if (hit) {
       this.assignTargetFor(eaterId, state, now, invuln);
     }
-    // Все, у кого этот victim был целью — переназначим.
     for (const [pid, ps] of state.players) {
       if (pid === eaterId) continue;
       if (ps.targetId === victimPlayerId) {
@@ -89,6 +95,26 @@ export class TargetSystem {
       }
     }
     return hit;
+  }
+
+  /** Новая часть после split — цель не меняем, копируем с соседних частей владельца. */
+  onSplitPartSpawned(
+    childId: string,
+    state: ArenaState,
+    now: number,
+    invuln: Map<string, number>,
+  ): void {
+    const inherited = this.getValidOwnerTarget(childId, state, now, invuln);
+    if (inherited) {
+      this.syncTargetToOwner(
+        childId,
+        inherited.targetId,
+        inherited.expiresAt,
+        state,
+      );
+      return;
+    }
+    this.assignTargetFor(childId, state, now, invuln);
   }
 
   /** Игрок добавлен/респавнен — назначим начальную цель. */
@@ -99,7 +125,6 @@ export class TargetSystem {
     invuln: Map<string, number>,
   ): void {
     this.assignTargetFor(playerId, state, now, invuln);
-    // Дадим этого новичка как цель кому-нибудь, у кого её нет — чтобы не висел без преследователей.
     for (const [pid, ps] of state.players) {
       if (pid === playerId) continue;
       if (!ps.targetId) {
@@ -129,14 +154,49 @@ export class TargetSystem {
     now: number,
     invuln: Map<string, number>,
   ): void {
-    // Цель пропала из state (например, съели её и она респавнилась под другим id) → выбрать новую.
-    if (ps.targetId && !state.players.has(ps.targetId)) {
+    if (
+      ps.targetId &&
+      (isSamePlayerOwner(ps.targetId, playerId) ||
+        !state.players.has(ps.targetId))
+    ) {
       this.assignTargetFor(playerId, state, now, invuln);
       return;
     }
-    // Срок истёк или цели не было.
     if (!ps.targetId || !ps.targetExpiresAt || ps.targetExpiresAt <= now) {
       this.assignTargetFor(playerId, state, now, invuln);
+    }
+  }
+
+  private getValidOwnerTarget(
+    playerId: string,
+    state: ArenaState,
+    now: number,
+    invuln: Map<string, number>,
+  ): { targetId: string; expiresAt: number } | null {
+    const owner = playerOwnerKey(playerId);
+    for (const [id, ps] of state.players) {
+      if (playerOwnerKey(id) !== owner) continue;
+      const tid = ps.targetId;
+      if (!tid || isSamePlayerOwner(tid, id)) continue;
+      if (!state.players.has(tid)) continue;
+      if ((invuln.get(tid) ?? 0) > now + 200) continue;
+      if (!ps.targetExpiresAt || ps.targetExpiresAt <= now) continue;
+      return { targetId: tid, expiresAt: ps.targetExpiresAt };
+    }
+    return null;
+  }
+
+  private syncTargetToOwner(
+    playerId: string,
+    targetId: string,
+    expiresAt: number,
+    state: ArenaState,
+  ): void {
+    const owner = playerOwnerKey(playerId);
+    for (const [id, ps] of state.players) {
+      if (playerOwnerKey(id) !== owner) continue;
+      ps.targetId = targetId;
+      ps.targetExpiresAt = expiresAt;
     }
   }
 }
