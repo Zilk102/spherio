@@ -175,3 +175,28 @@ function escapeText(s: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
 }
+
+const SPLIT_REASON_RU: Record<string, string> = {
+  too_small: "Слишком маленький шар для деления",
+  max_parts: "Максимум частей",
+  cooldown: "Деление на перезарядке",
+  no_parts: "Нет активной сферы",
+};
+
+export function showSplitHint(reason: string): void {
+  const text = SPLIT_REASON_RU[reason] ?? "Деление недоступно";
+  let root = document.getElementById("split-hint-toast");
+  if (!root) {
+    root = document.createElement("div");
+    root.id = "split-hint-toast";
+    root.className = "split-hint-toast hidden";
+    document.body.appendChild(root);
+  }
+  root.textContent = text;
+  root.classList.remove("hidden");
+  root.classList.add("split-hint-toast--show");
+  window.setTimeout(() => {
+    root?.classList.remove("split-hint-toast--show");
+    root?.classList.add("hidden");
+  }, 1600);
+}

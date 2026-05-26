@@ -6,6 +6,20 @@ export interface InputMessage {
   boost?: boolean;
 }
 
+/** Клиент → сервер: разделить сферу (одиночное действие, не удержание). */
+export interface SplitMessage {
+  /** Направление выстрела части (нормализовано на сервере); если нет — берётся текущий ввод. */
+  moveX?: number;
+  moveZ?: number;
+}
+
+/** Сервер → клиент: результат попытки split. */
+export interface SplitResultMessage {
+  ok: boolean;
+  reason?: string;
+  childId?: string;
+}
+
 export interface KillFeedEntry {
   killerName: string;
   victimName: string;

@@ -74,3 +74,25 @@ export const PRIVATE_MIN_HUMANS_TO_START = 2;
 export const TARGET_DURATION_MS = 60 * 1000;
 /** Множитель массы (и соответственно очков), получаемой при поедании именно своей цели. */
 export const TARGET_BONUS_MULT = 3;
+
+/** Минимальный радиус сферы, чтобы можно было делить (split). */
+export const SPLIT_MIN_RADIUS = 1.15;
+/** Доля массы, уходящая в отделившуюся часть (остальное остаётся у «родителя»). */
+export const SPLIT_CHILD_MASS_RATIO = 0.42;
+/** Импульс отделённой части вперёд (Н·с, умножается на dt в Rapier). */
+export const SPLIT_LAUNCH_IMPULSE = 14;
+/** Кулдаун между split одной сессии. */
+export const SPLIT_COOLDOWN_MS = 2800;
+/** Максимум частей (сфер) на одного игрока. */
+export const MAX_SPLIT_PARTS = 4;
+
+/** Кинетическое трение при «заблокированном» скольжении (м/с²). */
+export const SLIDE_FRICTION_DECEL = 6.8;
+/** Ускорение руля при скольжении (дрифт, м/с²). */
+export const DRIFT_STEER_ACCEL = 16;
+/** Насколько сохраняется боковая составная скорости при дрифте (1/с, меньше = дольше скользит боком). */
+export const DRIFT_LATERAL_DECAY = 1.8;
+/** Трение коллайдера в режиме скольжения (меньше — меньше снова раскручивает Rapier). */
+export const SLIDE_CONTACT_FRICTION = 0.12;
+/** Минимальная скорость (м/с) для тормозного следа. */
+export const SKID_MIN_SPEED = 1.4;

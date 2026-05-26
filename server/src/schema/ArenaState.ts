@@ -21,6 +21,8 @@ export class PlayerState extends Schema {
   @type("string") targetId = "";
   /** Серверное время, когда цель «протухнет» и будет перевыбрана. */
   @type("number") targetExpiresAt = 0;
+  /** true — игрок жмёт тормоз и едет достаточно быстро (для следов на клиенте). */
+  @type("boolean") braking = false;
 }
 
 export class PelletState extends Schema {

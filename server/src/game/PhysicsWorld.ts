@@ -6,17 +6,19 @@ import {
   GROUND_FRICTION,
   GROUND_Y,
   MAX_ANGULAR_SPEED,
+  SLIDE_CONTACT_FRICTION,
   SPHERE_FRICTION,
   SPHERE_RESTITUTION,
   WALL_HEIGHT,
 } from "@spherio/shared";
 import {
   angularDampingForMass,
+  applyDriftLateralGrip,
+  applyLockedWheelSlide,
   clampRadius,
   linearDampingForMass,
   massFromRadius,
   maxLinearSpeedForRadius,
-  rollingBrakeTorque,
   rollingDriveImpulse,
   rollingDriveTorque,
 } from "@spherio/shared";
@@ -160,7 +162,8 @@ export class PhysicsWorld {
     for (const p of this.players.values()) {
       const { moveX, moveZ, brake, boost } = p.input;
       const len = Math.hypot(moveX, moveZ);
-      const moving = len > 0.06;
+      const braking = !!brake;
+      const moving = len > 0.06 && !braking;
       const boosting = boost && moving;
       const boostMul = boosting ? BOOST_SPEED_MULTIPLIER : 1;
 
@@ -207,21 +210,19 @@ export class PhysicsWorld {
       }
 
       if (brake) {
+        p.collider.setFriction(SLIDE_CONTACT_FRICTION);
+        p.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
         const v = p.body.linvel();
-        const av = p.body.angvel();
-        const b = rollingBrakeTorque(p.mass, p.radius, v.x, v.z, av);
+        const slide = applyLockedWheelSlide(v.x, v.z, moveX, moveZ, dt);
         p.body.applyImpulse(
-          { x: b.linImpulse.x * dt, y: 0, z: b.linImpulse.z * dt },
+          { x: slide.dvx * p.mass, y: 0, z: slide.dvz * p.mass },
           true,
         );
-        p.body.applyTorqueImpulse(
-          {
-            x: b.angImpulse.x * dt,
-            y: b.angImpulse.y * dt,
-            z: b.angImpulse.z * dt,
-          },
-          true,
-        );
+        const after = p.body.linvel();
+        const gripped = applyDriftLateralGrip(after.x, after.z, moveX, moveZ, dt);
+        p.body.setLinvel({ x: gripped.vx, y: after.y, z: gripped.vz }, true);
+      } else {
+        p.collider.setFriction(SPHERE_FRICTION);
       }
     }
 
@@ -229,6 +230,9 @@ export class PhysicsWorld {
     this.world.step();
 
     for (const p of this.players.values()) {
+      if (p.input.brake) {
+        p.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+      }
       this.clampPlayerVelocity(p);
     }
   }

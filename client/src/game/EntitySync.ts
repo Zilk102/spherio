@@ -14,6 +14,7 @@ import {
 import { GROUND_Y, PELLET_RADIUS } from "@spherio/shared";
 import { attachSkinDecal, disposeSkinMaterials, getSphereBaseMaterial } from "./skinTextures.js";
 import { isLocalPart } from "../lib/playerParts.js";
+import type { LocalPredictor } from "./LocalPredictor.js";
 
 interface PlayerSnap {
   id: string;
@@ -49,8 +50,13 @@ interface SmoothState {
   radius: number;
 }
 
-/** Задержка рендера ~2 тика при 30 Hz патчах */
-const INTERP_DELAY_MS = 66;
+/** Базовая задержка рендера ~2 тика при 30 Hz патчах */
+const INTERP_DELAY_BASE_MS = 66;
+const INTERP_DELAY_MAX_MS = 180;
+
+function interpDelayMs(pingMs: number): number {
+  return Math.min(INTERP_DELAY_MAX_MS, Math.max(INTERP_DELAY_BASE_MS, INTERP_DELAY_BASE_MS + pingMs * 0.55));
+}
 const HISTORY_MAX_MS = 400;
 const SNAP_EPS = 0.008;
 /** Чуть выше пола, ниже дна сферы (дно ≈ GROUND_Y + 0.02) */
@@ -196,11 +202,13 @@ export class EntitySync {
     localId: string | null,
     now: number,
     dtSec: number,
+    predictor: LocalPredictor | null = null,
+    pingMs = 0,
   ): Mesh | null {
     const seen = new Set<string>();
     let localNode: Mesh | null = null;
     let localBestR = 0;
-    const renderT = now - INTERP_DELAY_MS;
+    const renderT = now - interpDelayMs(pingMs);
 
     for (const p of list) {
       seen.add(p.id);
@@ -253,8 +261,24 @@ export class EntitySync {
       const target = this.interpolate(hist, renderT) ?? p;
       const s = this.smooth.get(p.id)!;
       const isLocal = isLocalPart(p.id, localId);
+      const pred = isLocal && predictor ? predictor.getPredicted(p.id) : undefined;
 
-      if (isLocal) {
+      if (pred) {
+        // Позиция — client prediction (отзывчивый ввод).
+        // Вращение — с сервера (Rapier, реальное качение), иначе шар «скользит».
+        s.x = pred.body.x;
+        s.y = pred.body.y;
+        s.z = pred.body.z;
+        s.radius = pred.body.radius;
+        const blendQ = 1 - Math.exp(-28 * dtSec);
+        const cq = new Quaternion(s.qx, s.qy, s.qz, s.qw);
+        const tq = new Quaternion(target.qx, target.qy, target.qz, target.qw);
+        const oq = Quaternion.Slerp(cq, tq, blendQ);
+        s.qx = oq.x;
+        s.qy = oq.y;
+        s.qz = oq.z;
+        s.qw = oq.w;
+      } else if (isLocal) {
         const blend = 1 - Math.exp(-32 * dtSec);
         s.x += (target.x - s.x) * blend;
         s.y += (target.y - s.y) * blend;
@@ -541,6 +565,13 @@ export class EntitySync {
 
   getMesh(id: string): Mesh | undefined {
     return this.players.get(id);
+  }
+
+  /** Текущая отображаемая позиция (интерполяция / prediction). */
+  getDisplayPosition(id: string): { x: number; y: number; z: number } | null {
+    const s = this.smooth.get(id);
+    if (!s) return null;
+    return { x: s.x, y: s.y, z: s.z };
   }
 
   private playerMat(skinId: string, color: number): StandardMaterial {

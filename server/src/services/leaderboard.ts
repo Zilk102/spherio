@@ -71,19 +71,24 @@ export async function submitScore(
   displayName: string,
   radius: number,
 ): Promise<void> {
-  const score = scoreFromRadius(radius);
-  const name = displayName.slice(0, 16);
-  const redis = await getRedis();
-  if (redis) {
-    const day = todayKey();
-    const pipe = redis.multi();
-    pipe.zAdd("lb:all", { score, value: userId }, { GT: true });
-    pipe.zAdd(`lb:daily:${day}`, { score, value: userId }, { GT: true });
-    pipe.hSet("lb:names", userId, name);
-    await pipe.exec();
-    return;
+  try {
+    const score = scoreFromRadius(radius);
+    const name = displayName.slice(0, 16);
+    const redis = await getRedis();
+    if (redis) {
+      const day = todayKey();
+      const pipe = redis.multi();
+      pipe.zAdd("lb:all", { score, value: userId }, { GT: true });
+      pipe.zAdd(`lb:daily:${day}`, { score, value: userId }, { GT: true });
+      pipe.hSet("lb:names", userId, name);
+      await pipe.exec();
+      return;
+    }
+    memorySubmit(userId, name, score);
+  } catch (err) {
+    console.error("[leaderboard] submitScore failed:", err);
+    throw err;
   }
-  memorySubmit(userId, name, score);
 }
 
 async function redisTop(key: string, limit: number): Promise<LeaderboardEntry[]> {

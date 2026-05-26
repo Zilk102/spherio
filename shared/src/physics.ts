@@ -2,11 +2,14 @@ import {
   BASE_MASS,
   CAM_RADIUS_MAX,
   CAM_RADIUS_MIN,
+  DRIFT_LATERAL_DECAY,
+  DRIFT_STEER_ACCEL,
   GRAVITY,
   MAX_LINEAR_SPEED,
   MAX_RADIUS,
   MIN_RADIUS,
   R0,
+  SLIDE_FRICTION_DECEL,
 } from "./constants.js";
 
 export function clampRadius(r: number): number {
@@ -112,27 +115,84 @@ export function rollingDriveTorque(
   return { x: -nz * torque, y: 0, z: nx * torque };
 }
 
-/** Торможение: тяжелее — сильнее тормозит, гасит вращение */
-export function rollingBrakeTorque(
-  mass: number,
-  radius: number,
+/**
+ * «Заблокированные колёса»: вращение гасится снаружи (angvel → 0),
+ * линейная скорость уменьшается только трением скольжения; руль даёт дрифт.
+ */
+export function applyLockedWheelSlide(
+  vx: number,
+  vz: number,
+  moveX: number,
+  moveZ: number,
+  dt: number,
+): { dvx: number; dvz: number; slipRatio: number } {
+  const speed = Math.hypot(vx, vz);
+  if (speed < 0.05 || dt <= 0) {
+    return { dvx: 0, dvz: 0, slipRatio: 0 };
+  }
+
+  const inv = 1 / speed;
+  const dirX = vx * inv;
+  const dirZ = vz * inv;
+
+  const fricDv = Math.min(speed, SLIDE_FRICTION_DECEL * dt);
+  let dvx = -dirX * fricDv;
+  let dvz = -dirZ * fricDv;
+
+  const steerLen = Math.hypot(moveX, moveZ);
+  let driftBoost = 0;
+  if (steerLen > 0.06) {
+    const nx = moveX / steerLen;
+    const nz = moveZ / steerLen;
+    const cross = dirX * nz - dirZ * nx;
+    const driftScale = 0.25 + 0.75 * Math.min(1, Math.abs(cross));
+    const steerDv = DRIFT_STEER_ACCEL * dt * driftScale;
+    dvx += nx * steerDv;
+    dvz += nz * steerDv;
+    driftBoost = driftScale * 0.35;
+  }
+
+  const slipRatio = Math.min(
+    1,
+    0.55 + driftBoost + Math.min(0.45, fricDv / (speed + 0.01)),
+  );
+  return { dvx, dvz, slipRatio };
+}
+
+/** Сохранить боковую составную при дрифте (низкое сцепление). */
+export function applyDriftLateralGrip(
+  vx: number,
+  vz: number,
+  moveX: number,
+  moveZ: number,
+  dt: number,
+): { vx: number; vz: number } {
+  const steerLen = Math.hypot(moveX, moveZ);
+  if (steerLen < 0.06 || dt <= 0) return { vx, vz };
+
+  const nx = moveX / steerLen;
+  const nz = moveZ / steerLen;
+  const fwd = vx * nx + vz * nz;
+  const latX = vx - nx * fwd;
+  const latZ = vz - nz * fwd;
+  const retain = Math.exp(-DRIFT_LATERAL_DECAY * dt);
+  return {
+    vx: nx * fwd + latX * retain,
+    vz: nz * fwd + latZ * retain,
+  };
+}
+
+/** Насколько скорость «скользит» относительно вращения (1 = полный занос). */
+export function slideSlipRatio(
   vx: number,
   vz: number,
   angVel: { x: number; y: number; z: number },
-): { linImpulse: { x: number; z: number }; angImpulse: { x: number; y: number; z: number } } {
-  const I = sphereInertia(mass, radius);
+  radius: number,
+): number {
   const speed = Math.hypot(vx, vz);
-  const brakeF = 4.2 * mass;
-  const linScale = speed > 0.05 ? brakeF / speed : 0;
-  const angScale = 0.12 + (radius / R0) * 0.04;
-  return {
-    linImpulse: { x: -vx * linScale, z: -vz * linScale },
-    angImpulse: {
-      x: -angVel.x * I * angScale,
-      y: -angVel.y * I * angScale,
-      z: -angVel.z * I * angScale,
-    },
-  };
+  if (speed < 0.4) return 0;
+  const spinSpeed = Math.hypot(angVel.x, angVel.z) * radius;
+  return Math.min(1, Math.abs(speed - spinSpeed) / speed);
 }
 
 export { GRAVITY };

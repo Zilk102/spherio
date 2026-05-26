@@ -7,6 +7,7 @@ export class InputController {
   private keys = new Set<string>();
   brake = false;
   boost = false;
+  private splitQueued = false;
   private joystick: VirtualJoystick | null = null;
   private readonly touchUi: boolean;
 
@@ -18,6 +19,10 @@ export class InputController {
 
     this.bindButton("btn-brake", () => (this.brake = true), () => (this.brake = false));
     this.bindButton("btn-boost", () => (this.boost = true), () => (this.boost = false));
+    document.getElementById("btn-split")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      this.splitQueued = true;
+    });
 
     if (touchUi) {
       try {
@@ -51,7 +56,7 @@ export class InputController {
     const codes = [
       "KeyW", "KeyA", "KeyS", "KeyD",
       "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
-      "Space", "ShiftLeft", "ShiftRight",
+      "Space", "ShiftLeft", "ShiftRight", "KeyE",
     ];
     if (codes.includes(e.code)) e.preventDefault();
 
@@ -63,6 +68,10 @@ export class InputController {
       this.boost = down;
       return;
     }
+    if (e.code === "KeyE" && down) {
+      this.splitQueued = true;
+      return;
+    }
     if (down) this.keys.add(e.code);
     else this.keys.delete(e.code);
   }
@@ -71,7 +80,15 @@ export class InputController {
     this.keys.clear();
     this.brake = false;
     this.boost = false;
+    this.splitQueued = false;
     this.joystick?.reset();
+  }
+
+  /** Одноразовый запрос split (сбрасывается после чтения). */
+  consumeSplit(): boolean {
+    if (!this.splitQueued) return false;
+    this.splitQueued = false;
+    return true;
   }
 
   getInput(axes: CameraMoveAxes): InputMessage {

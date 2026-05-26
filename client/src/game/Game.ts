@@ -1,5 +1,6 @@
 import { Engine, Scene } from "@babylonjs/core";
 import type { KillFeedEntry, MatchEndMessage, MatchResultsMessage } from "@spherio/shared";
+import { SKID_MIN_SPEED } from "@spherio/shared";
 import type { Room } from "colyseus.js";
 import { clearReconnectToken, getPing } from "../net/colyseus.js";
 import { pickLargestLocalPart } from "../lib/playerParts.js";
@@ -8,11 +9,21 @@ import { CameraController } from "./CameraController.js";
 import { EntitySync } from "./EntitySync.js";
 import { InputController } from "./InputController.js";
 import { isTouchPrimaryDevice } from "../lib/touchDevice.js";
-import { showTargetBonusToast, updateHud, updateHudTarget, updateHudTimer } from "../ui/hud.js";
+import {
+  showSplitHint,
+  showTargetBonusToast,
+  updateHud,
+  updateHudTarget,
+  updateHudTimer,
+} from "../ui/hud.js";
 import { KillFeedUi } from "../ui/killfeed.js";
 import { getChatUi } from "../ui/chat.js";
 import { DeathOverlay } from "../ui/death.js";
 import { MatchEndOverlay } from "../ui/matchEnd.js";
+import { LocalPredictor } from "./LocalPredictor.js";
+import { SkidMarkSystem } from "./SkidMarkSystem.js";
+import { isLocalPart } from "../lib/playerParts.js";
+import type { SplitResultMessage } from "@spherio/shared";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ArenaState = any;
@@ -35,6 +46,7 @@ type PlayerSnap = {
   invulnUntil: number;
   targetId: string;
   targetExpiresAt: number;
+  braking?: boolean;
 };
 
 interface TargetBonusMessage {
@@ -66,6 +78,8 @@ export class Game {
   private readonly killFeed = new KillFeedUi();
   private readonly death = new DeathOverlay();
   private readonly matchEnd = new MatchEndOverlay();
+  private readonly predictor = new LocalPredictor();
+  private skidMarks!: SkidMarkSystem;
 
   constructor(private canvas: HTMLCanvasElement) {
     this.engine = new Engine(canvas, true, {
@@ -74,9 +88,10 @@ export class Game {
       antialias: true,
     });
     this.scene = new Scene(this.engine);
-    buildArena(this.scene);
+    const ground = buildArena(this.scene);
     this.camera = new CameraController(this.scene, canvas);
     this.entities = new EntitySync(this.scene);
+    this.skidMarks = new SkidMarkSystem(this.scene, ground);
   }
 
   async connect(room: Room, playerName: string): Promise<void> {
@@ -121,6 +136,11 @@ export class Game {
         new CustomEvent<GameLeaveDetail>("sphere3d:match-end", { detail: {} }),
       );
     });
+    room.onMessage("split_result", (msg: SplitResultMessage) => {
+      if (!msg.ok && msg.reason && msg.reason !== "cooldown") {
+        showSplitHint(msg.reason);
+      }
+    });
     room.onLeave((code) => {
       if (code === 1000) clearReconnectToken();
     });
@@ -135,8 +155,14 @@ export class Game {
       const now = Date.now();
       const dtSec = this.engine.getDeltaTime() / 1000;
       if (this.room) {
+        const axes = this.camera.getMoveAxes();
+        const input = this.input.getInput(axes);
         if (!this.menuOpen && !this.matchEndVisible()) {
-          this.room.send("input", this.input.getInput(this.camera.getMoveAxes()));
+          this.predictor.setInputForSession(this.localId, input);
+          this.room.send("input", input);
+          if (this.input.consumeSplit()) {
+            this.room.send("split", { moveX: input.moveX, moveZ: input.moveZ });
+          }
         }
         const state = this.lastState ?? this.room.state;
         if (state) {
@@ -144,6 +170,16 @@ export class Game {
           state.players.forEach((p: PlayerSnap) => {
             players.push({ ...p });
           });
+
+          const seen = new Set<string>();
+          for (const p of players) {
+            seen.add(p.id);
+            if (isLocalPart(p.id, this.localId)) {
+              this.predictor.ensurePart(p.id, p);
+            }
+          }
+          this.predictor.prune(seen, this.localId);
+          this.predictor.simulate(dtSec);
 
           const pellets: { id: string; x: number; y: number; z: number }[] = [];
           for (let i = 0; i < state.pellets.length; i++) {
@@ -162,13 +198,43 @@ export class Game {
           }
           this.hadLocalPart = hasLocal || this.hadLocalPart;
 
+          const ping = this.room ? getPing(this.room) : 0;
           const local = this.entities.syncPlayers(
             players,
             this.localId,
             now,
             dtSec,
+            this.predictor,
+            ping,
           );
           this.entities.syncPellets(pellets);
+
+          const localBrake = !this.menuOpen && this.input.brake;
+          this.skidMarks.update(
+            players.map((p) => {
+              const pos = this.entities.getDisplayPosition(p.id);
+              const isLocal = isLocalPart(p.id, this.localId);
+              const predVel = isLocal ? this.predictor.getVelocity(p.id) : null;
+              const vx = predVel?.vx ?? p.vx;
+              const vz = predVel?.vz ?? p.vz;
+              const speed = Math.hypot(vx, vz);
+              const braking =
+                speed >= SKID_MIN_SPEED &&
+                (isLocal ? localBrake : !!p.braking);
+              return {
+                id: p.id,
+                x: pos?.x ?? p.x,
+                z: pos?.z ?? p.z,
+                vx,
+                vz,
+                radius: p.radius,
+                braking,
+                color: p.color,
+                skinId: p.skinId,
+              };
+            }),
+            now,
+          );
 
           let camTarget = local;
           let camRadius = me?.radius ?? 0.5;
@@ -210,7 +276,7 @@ export class Game {
               vx: p.vx,
               vz: p.vz,
             })),
-            this.room ? getPing(this.room) : 0,
+            ping,
           );
 
           updateHudTimer({
@@ -276,6 +342,7 @@ export class Game {
     this.matchEnd.hide();
     this.death.hide();
     this.entities.dispose();
+    this.skidMarks.dispose();
     this.scene.dispose();
     this.engine.dispose();
   }

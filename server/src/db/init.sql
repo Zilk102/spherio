@@ -6,6 +6,8 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT,
   display_name VARCHAR(16) NOT NULL,
   equipped_skin_id TEXT NOT NULL DEFAULT 'emoji_grin',
+  -- JSONB: удобно мержить при гостевом→полному аккаунту. Для запросов «у кого есть скин X»
+  -- можно позже мигрировать на text[] + GIN (owned_skin_ids @> ARRAY['skin_id']).
   owned_skin_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
   is_guest BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

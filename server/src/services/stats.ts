@@ -77,20 +77,25 @@ export async function recordMatchEnd(
   }
 
   if (!pool) return defaultStats();
-  await ensureStatsRow(userId);
-  await pool.query(
-    `UPDATE user_stats SET
-      games_played = games_played + 1,
-      kills = kills + $2,
-      deaths = deaths + $3,
-      best_score = GREATEST(best_score, $4),
-      total_time_sec = total_time_sec + $5,
-      coins = coins + $6,
-      updated_at = NOW()
-     WHERE user_id = $1`,
-    [userId, data.kills, data.deaths, score, data.timeSec, coinGain],
-  );
-  return getStats(userId, false);
+  try {
+    await ensureStatsRow(userId);
+    await pool.query(
+      `UPDATE user_stats SET
+        games_played = games_played + 1,
+        kills = kills + $2,
+        deaths = deaths + $3,
+        best_score = GREATEST(best_score, $4),
+        total_time_sec = total_time_sec + $5,
+        coins = coins + $6,
+        updated_at = NOW()
+       WHERE user_id = $1`,
+      [userId, data.kills, data.deaths, score, data.timeSec, coinGain],
+    );
+    return getStats(userId, false);
+  } catch (err) {
+    console.error("[stats] recordMatchEnd failed:", err);
+    throw err;
+  }
 }
 
 export async function spendCoins(userId: string, amount: number): Promise<boolean> {

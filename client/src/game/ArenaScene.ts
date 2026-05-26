@@ -3,6 +3,7 @@ import {
   Color4,
   DynamicTexture,
   HemisphericLight,
+  Mesh,
   MeshBuilder,
   StandardMaterial,
   Texture,
@@ -16,7 +17,10 @@ import {
   paintAsphaltTexture,
 } from "./groundTexture.js";
 
-export function buildArena(scene: Scene): void {
+/** Высота плоскости асфальта (мировые координаты). */
+export const ARENA_GROUND_MESH_NAME = "ground";
+
+export function buildArena(scene: Scene): Mesh {
   scene.clearColor = new Color4(0.06, 0.1, 0.14, 1);
 
   const hemi = new HemisphericLight("hemi", new Vector3(0.2, 1, 0.1), scene);
@@ -25,7 +29,7 @@ export function buildArena(scene: Scene): void {
   hemi.diffuse = new Color3(0.92, 0.94, 0.98);
 
   const ground = MeshBuilder.CreateGround(
-    "ground",
+    ARENA_GROUND_MESH_NAME,
     { width: ARENA_SIZE, height: ARENA_SIZE, subdivisions: 1 },
     scene,
   );
@@ -71,4 +75,6 @@ export function buildArena(scene: Scene): void {
     wall.position.set(x, ht / 2, z);
     wall.material = wallMat;
   }
+
+  return ground;
 }

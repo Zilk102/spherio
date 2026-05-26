@@ -12,7 +12,7 @@ const menuHint = document.getElementById("menu-hint");
 if (menuHint) {
   menuHint.textContent = isTouchPrimaryDevice()
     ? "Джойстик — движение · кнопки справа · Enter — чат"
-    : "WASD — движение · Shift — ускорение · Space — тормоз · Меню";
+    : "WASD — движение · Shift — boost · Space — стоп · E — split · Меню";
 }
 
 const hudControls = document.getElementById("hud-controls");

@@ -19,6 +19,7 @@ import type {
   MatchEndMessage,
   MatchLeaderboardRow,
   MatchResultsMessage,
+  SplitMessage,
 } from "@spherio/shared";
 import { getGuest, verifyToken } from "../services/auth.js";
 import { pool } from "../db/pool.js";
@@ -32,6 +33,7 @@ import { PelletManager } from "../game/PelletManager.js";
 import { EatResolver } from "../game/EatResolver.js";
 import { BotAI } from "../game/BotAI.js";
 import { TargetSystem } from "../game/TargetSystem.js";
+import { trySplit, type SplitContext } from "../game/split.js";
 import { randomBotName } from "../game/botNames.js";
 import { PelletManager as PelletUtil } from "../game/PelletManager.js";
 import { InputRateLimiter } from "../game/rateLimit.js";
@@ -83,6 +85,10 @@ export class ArenaRoom extends Room<ArenaState> {
   /** sessionId-набор клиентов, которые уже получили per-player match_end (чтобы не отправлять дважды). */
   private endedSessions = new Set<string>();
   private matchEndScheduled = false;
+  /** O(1) доступ к Client по sessionId (в tick не делаем clients.find). */
+  private clientBySession = new Map<string, Client>();
+  private splitCooldownUntil = new Map<string, number>();
+  private lastSplitAttemptMs = new Map<string, number>();
 
   async onCreate(): Promise<void> {
     this.setState(new ArenaState());
@@ -131,6 +137,53 @@ export class ArenaRoom extends Room<ArenaState> {
       handleBoost(this.physics, this.sessionParts, sessionId, !!clean.boost);
     });
 
+    this.onMessage("split", (client, msg: SplitMessage) => {
+      if (!this.matchActive) return;
+      const meta = (client as Client & { meta?: SessionMeta }).meta;
+      if (!meta?.playerId || meta.isBot) return;
+      const sessionId = client.sessionId;
+      const now = Date.now();
+      const last = this.lastSplitAttemptMs.get(sessionId) ?? 0;
+      if (now - last < 120) return;
+      this.lastSplitAttemptMs.set(sessionId, now);
+
+      const ctx: SplitContext = {
+        physics: this.physics,
+        state: this.state,
+        sessionParts: this.sessionParts,
+        splitCooldownUntil: this.splitCooldownUntil,
+        invuln: this.invuln,
+      };
+      const primaryPs = this.state.players.get(meta.playerId);
+      const result = trySplit(
+        ctx,
+        sessionId,
+        {
+          name: meta.name,
+          color: primaryPs?.color ?? 0xffffff,
+          skinId: primaryPs?.skinId ?? "emoji_grin",
+        },
+        msg ?? {},
+        now,
+      );
+      if (!result.ok) {
+        try {
+          client.send("split_result", { ok: false, reason: result.reason });
+        } catch {
+          /* disconnected */
+        }
+        return;
+      }
+
+      this.targetSystem.onPlayerSpawned(result.childId, this.state, now, this.invuln);
+
+      try {
+        client.send("split_result", { ok: true, childId: result.childId });
+      } catch {
+        /* disconnected */
+      }
+    });
+
     this.onMessage("chat", (client, msg: ChatMessage) => {
       const meta = (client as Client & { meta?: SessionMeta }).meta;
       const name =
@@ -163,8 +216,15 @@ export class ArenaRoom extends Room<ArenaState> {
 
   async onJoin(client: Client, options: JoinOptions): Promise<void> {
     const sessionId = client.sessionId;
+    this.clientBySession.set(sessionId, client);
     const existing = this.sessionParts.get(sessionId);
     if (existing && existing.length > 0) {
+      const liveParts = [...this.state.players.keys()].filter(
+        (id) => id === sessionId || id.startsWith(`${sessionId}~`),
+      );
+      if (liveParts.length > 0) {
+        this.sessionParts.set(sessionId, liveParts);
+      }
       console.log(`[ArenaRoom] Реконнект ${sessionId}`);
       return;
     }
@@ -219,7 +279,7 @@ export class ArenaRoom extends Room<ArenaState> {
   async onLeave(client: Client, consented?: boolean): Promise<void> {
     const sessionId = client.sessionId;
     if (consented) {
-      this.finalizeSession(client, false);
+      await this.finalizeSession(client, false);
       this.onHumanLeft();
       this.refreshMetadata();
       return;
@@ -228,10 +288,14 @@ export class ArenaRoom extends Room<ArenaState> {
       await this.allowReconnection(client, RECONNECT_SEC);
       console.log(`[ArenaRoom] Ожидание реконнекта ${sessionId}`);
     } catch {
-      this.finalizeSession(client, true);
+      await this.finalizeSession(client, true);
       this.onHumanLeft();
       this.refreshMetadata();
     }
+  }
+
+  private getClientBySession(sessionId: string): Client | undefined {
+    return this.clientBySession.get(sessionId);
   }
 
   /** Хук — переопределяется в PrivateArenaRoom для запуска отложенного таймера. */
@@ -282,6 +346,10 @@ export class ArenaRoom extends Room<ArenaState> {
 
   /** Завершить матч по таймеру: разослать лидерборд, заморозить input, через MATCH_END_HOLD_MS dispose. */
   protected finishMatchByTimer(): void {
+    void this.finishMatchByTimerAsync();
+  }
+
+  private async finishMatchByTimerAsync(): Promise<void> {
     if (!this.matchActive || this.matchEndScheduled) return;
     this.matchActive = false;
     this.matchEndScheduled = true;
@@ -295,11 +363,12 @@ export class ArenaRoom extends Room<ArenaState> {
     );
 
     // Финализируем сессии оставшихся реальных игроков (пишем stats/leaderboard в БД).
-    for (const client of this.clients) {
-      try {
-        this.finalizeSession(client, false);
-      } catch (err) {
-        console.warn("[ArenaRoom] finalize fail", err);
+    const finalizeResults = await Promise.allSettled(
+      [...this.clients].map((client) => this.finalizeSession(client, false)),
+    );
+    for (const r of finalizeResults) {
+      if (r.status === "rejected") {
+        console.error("[ArenaRoom] finalizeSession при окончании матча:", r.reason);
       }
     }
 
@@ -363,7 +432,7 @@ export class ArenaRoom extends Room<ArenaState> {
   }
 
   /** @param sendMatchEnd — false при добровольном выходе «В меню» (без модалки итогов) */
-  private finalizeSession(client: Client, sendMatchEnd = true): void {
+  private async finalizeSession(client: Client, sendMatchEnd = true): Promise<void> {
     const sessionId = client.sessionId;
     if (this.endedSessions.has(sessionId)) return;
     this.endedSessions.add(sessionId);
@@ -393,13 +462,7 @@ export class ArenaRoom extends Room<ArenaState> {
 
         // Глобальный топ/ежедневный/долгосрочные user_stats пишем ТОЛЬКО из публичных матчей.
         if (!this.isPrivateRoom) {
-          void submitScore(meta.userId, meta.name, bestR);
-          void recordMatchEnd(meta.userId, meta.guest, {
-            kills: st.kills,
-            deaths: st.deaths,
-            bestRadius: bestR,
-            timeSec,
-          });
+          await this.persistPublicMatchStats(meta, st, bestR, timeSec);
         }
 
         if (sendMatchEnd) {
@@ -427,6 +490,33 @@ export class ArenaRoom extends Room<ArenaState> {
     this.sessionParts.delete(sessionId);
     this.sessionStats.delete(sessionId);
     this.rateLimiter.remove(sessionId);
+    this.clientBySession.delete(sessionId);
+  }
+
+  /** Запись рекорда и статистики матча; ошибки логируются, не рвут disconnect. */
+  private async persistPublicMatchStats(
+    meta: SessionMeta,
+    st: SessionStats,
+    bestR: number,
+    timeSec: number,
+  ): Promise<void> {
+    const results = await Promise.allSettled([
+      submitScore(meta.userId, meta.name, bestR),
+      recordMatchEnd(meta.userId, meta.guest, {
+        kills: st.kills,
+        deaths: st.deaths,
+        bestRadius: bestR,
+        timeSec,
+      }),
+    ]);
+    for (const r of results) {
+      if (r.status === "rejected") {
+        console.error(
+          `[ArenaRoom] не удалось сохранить результат матча user=${meta.userId} name=${meta.name}:`,
+          r.reason,
+        );
+      }
+    }
   }
 
   private estimateRank(radius: number): number {
@@ -577,12 +667,10 @@ export class ArenaRoom extends Room<ArenaState> {
         // Уведомим клиента о бонусе — пусть отрисует «toast» x3.
         if (e.wasTargetKill) {
           try {
-            this.clients
-              .find((c) => c.sessionId === killerSession)
-              ?.send("target_bonus", {
-                victimName: e.victimName,
-                mult: 3,
-              });
+            this.getClientBySession(killerSession)?.send("target_bonus", {
+              victimName: e.victimName,
+              mult: 3,
+            });
           } catch {
             /* клиент мог отвалиться */
           }
@@ -645,6 +733,9 @@ export class ArenaRoom extends Room<ArenaState> {
       ps.qw = r.w;
       ps.radius = body.radius;
       ps.invulnUntil = this.invuln.get(id) ?? 0;
+      const speed = Math.hypot(v.x, v.z);
+      ps.braking =
+        !!body.input.brake && speed >= 0.9;
     }
   }
 
