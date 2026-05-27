@@ -304,15 +304,18 @@ export class EntitySync {
       const pred = isLocal && predictor ? predictor.getPredicted(p.id) : undefined;
 
       if (pred) {
-        // Позиция — client prediction (отзывчивый ввод).
-        // Вращение — с сервера (Rapier, реальное качение), иначе шар «скользит».
+        // Позиция — prediction; вращение — последний патч сервера + один slerp (без «отстающего» renderT).
         s.x = pred.body.x;
         s.y = pred.body.y;
         s.z = pred.body.z;
         s.radius = pred.body.radius;
-        const blendQ = 1 - Math.exp(-28 * dtSec);
+        const rot = pair?.to ?? target;
+        const blendQ = 1 - Math.exp(-45 * dtSec);
         this._qA.set(s.qx, s.qy, s.qz, s.qw);
-        this._qB.set(target.qx, target.qy, target.qz, target.qw);
+        this._qB.set(rot.qx, rot.qy, rot.qz, rot.qw);
+        if (Quaternion.Dot(this._qA, this._qB) < 0) {
+          this._qB.set(-rot.qx, -rot.qy, -rot.qz, -rot.qw);
+        }
         Quaternion.SlerpToRef(this._qA, this._qB, blendQ, this._qOut);
         s.qx = this._qOut.x;
         s.qy = this._qOut.y;
@@ -324,13 +327,10 @@ export class EntitySync {
         s.y += (target.y - s.y) * blend;
         s.z += (target.z - s.z) * blend;
         s.radius += (target.radius - s.radius) * blend;
-        this._qA.set(s.qx, s.qy, s.qz, s.qw);
-        this._qB.set(target.qx, target.qy, target.qz, target.qw);
-        Quaternion.SlerpToRef(this._qA, this._qB, blend, this._qOut);
-        s.qx = this._qOut.x;
-        s.qy = this._qOut.y;
-        s.qz = this._qOut.z;
-        s.qw = this._qOut.w;
+        s.qx = target.qx;
+        s.qy = target.qy;
+        s.qz = target.qz;
+        s.qw = target.qw;
       }
 
       node.position.set(s.x, s.y, s.z);

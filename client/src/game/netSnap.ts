@@ -1,3 +1,5 @@
+import { Quaternion } from "@babylonjs/core";
+
 /** Два серверных снимка для интерполяции 30→60 Гц. */
 export interface NetSample {
   t: number;
@@ -64,7 +66,32 @@ export function pushNetPair(
     return;
   }
   cur.from = cur.to;
-  cur.to = sample;
+  cur.to = alignQuatHemisphere(cur.to, sample);
+}
+
+const _qA = new Quaternion();
+const _qB = new Quaternion();
+const _qOut = new Quaternion();
+
+function alignQuatHemisphere(ref: NetSample, next: NetSample): NetSample {
+  const dot =
+    ref.qx * next.qx + ref.qy * next.qy + ref.qz * next.qz + ref.qw * next.qw;
+  if (dot >= 0) return next;
+  return { ...next, qx: -next.qx, qy: -next.qy, qz: -next.qz, qw: -next.qw };
+}
+
+function slerpQuat(
+  a: { qx: number; qy: number; qz: number; qw: number },
+  b: { qx: number; qy: number; qz: number; qw: number },
+  t: number,
+): { qx: number; qy: number; qz: number; qw: number } {
+  _qA.set(a.qx, a.qy, a.qz, a.qw);
+  _qB.set(b.qx, b.qy, b.qz, b.qw);
+  if (Quaternion.Dot(_qA, _qB) < 0) {
+    _qB.set(-b.qx, -b.qy, -b.qz, -b.qw);
+  }
+  Quaternion.SlerpToRef(_qA, _qB, t, _qOut);
+  return { qx: _qOut.x, qy: _qOut.y, qz: _qOut.z, qw: _qOut.w };
 }
 
 const MAX_EXTRAP_MS = 100;
@@ -91,6 +118,7 @@ export function sampleNetPair(pair: NetPair, renderT: number): NetSample {
     };
   }
   const f = (renderT - from.t) / (to.t - from.t);
+  const q = slerpQuat(from, to, f);
   return {
     t: renderT,
     x: from.x + (to.x - from.x) * f,
@@ -98,10 +126,10 @@ export function sampleNetPair(pair: NetPair, renderT: number): NetSample {
     z: from.z + (to.z - from.z) * f,
     vx: from.vx + (to.vx - from.vx) * f,
     vz: from.vz + (to.vz - from.vz) * f,
-    qx: from.qx + (to.qx - from.qx) * f,
-    qy: from.qy + (to.qy - from.qy) * f,
-    qz: from.qz + (to.qz - from.qz) * f,
-    qw: from.qw + (to.qw - from.qw) * f,
+    qx: q.qx,
+    qy: q.qy,
+    qz: q.qz,
+    qw: q.qw,
     radius: from.radius + (to.radius - from.radius) * f,
   };
 }
