@@ -11,6 +11,10 @@ import type {
   ProfileResponse,
   RefreshRequest,
   RegisterRequest,
+  RegisterPendingResponse,
+  ResendVerificationRequest,
+  ResendVerificationResponse,
+  VerifyEmailResponse,
   ShopBuyRequest,
   ShopBuyResponse,
 } from "@spherio/shared";
@@ -66,8 +70,19 @@ export async function authRefresh(req: RefreshRequest): Promise<AuthResponse> {
   return post("/api/auth/refresh", req);
 }
 
-export async function authRegister(req: RegisterRequest): Promise<AuthResponse> {
+export async function authRegister(req: RegisterRequest): Promise<RegisterPendingResponse> {
   return post("/api/auth/register", req);
+}
+
+export async function verifyEmailToken(token: string): Promise<VerifyEmailResponse> {
+  const q = encodeURIComponent(token);
+  return get(`/api/auth/verify-email?token=${q}`);
+}
+
+export async function resendVerification(
+  req: ResendVerificationRequest,
+): Promise<ResendVerificationResponse> {
+  return post("/api/auth/resend-verification", req);
 }
 
 export async function authLogin(req: LoginRequest): Promise<AuthResponse> {

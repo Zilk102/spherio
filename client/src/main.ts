@@ -1,6 +1,7 @@
 import { MainMenu } from "./ui/menu.js";
 import { getChatUi } from "./ui/chat.js";
-import { isTouchPrimaryDevice } from "./lib/touchDevice.js";
+import { isTouchPrimaryDevice, syncTouchGameChrome } from "./lib/touchDevice.js";
+import { verifyEmailToken } from "./api/http.js";
 
 getChatUi();
 
@@ -22,24 +23,43 @@ if (hudControls) {
     : "Чат: Enter открыть · Esc закрыть";
 }
 
-if (controls && !isTouchPrimaryDevice()) {
-  controls.classList.add("touch-only");
-}
+syncTouchGameChrome(false);
 
 function setStatus(msg: string): void {
   if (status) status.textContent = msg;
+}
+
+const verifyParam = new URLSearchParams(location.search).get("verify");
+if (verifyParam) {
+  void (async () => {
+    try {
+      const r = await verifyEmailToken(verifyParam);
+      if (r.ok) {
+        setStatus("Email подтверждён. Теперь можно войти в аккаунт.");
+      } else if (r.error === "expired") {
+        setStatus("Ссылка истекла. Запросите новое письмо при входе.");
+      } else {
+        setStatus("Ссылка недействительна или уже использована.");
+      }
+    } catch {
+      setStatus("Не удалось подтвердить email");
+    }
+    const u = new URL(location.href);
+    u.searchParams.delete("verify");
+    history.replaceState({}, "", u.pathname + u.search + u.hash);
+  })();
+}
+
+if ("serviceWorker" in navigator) {
+  void navigator.serviceWorker.getRegistrations().then((regs) => {
+    for (const r of regs) void r.unregister();
+  });
 }
 
 const menu = new MainMenu(canvas, {
   setStatus,
   onEnterGame: () => {
     document.body.classList.add("in-game");
-    if (isTouchPrimaryDevice()) {
-      document.body.classList.add("in-game--touch");
-    }
-    controls?.classList.remove("hidden");
-    if (!isTouchPrimaryDevice()) {
-      controls?.classList.add("touch-only");
-    }
+    syncTouchGameChrome(true);
   },
 });

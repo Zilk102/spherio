@@ -1,0 +1,20 @@
+{
+  "name": "Sphere3D",
+  "short_name": "Sphere3D",
+  "description": "3D арена в браузере — катись, ешь, расти",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#04080f",
+  "theme_color": "#04080f",
+  "lang": "ru",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

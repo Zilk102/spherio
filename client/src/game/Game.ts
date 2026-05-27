@@ -2,7 +2,13 @@ import { Engine, Scene } from "@babylonjs/core";
 import type { KillFeedEntry, MatchEndMessage, MatchResultsMessage } from "@spherio/shared";
 import { SKID_MIN_SPEED } from "@spherio/shared";
 import type { Room } from "colyseus.js";
-import { clearReconnectToken, getPing } from "../net/colyseus.js";
+import {
+  attachRoomPing,
+  clearReconnectToken,
+  detachRoomPing,
+  getPing,
+  tickRoomPing,
+} from "../net/colyseus.js";
 import { pickLargestLocalPart } from "../lib/playerParts.js";
 import { buildArena } from "./ArenaScene.js";
 import { CameraController } from "./CameraController.js";
@@ -24,6 +30,8 @@ import { LocalPredictor } from "./LocalPredictor.js";
 import { SkidMarkSystem } from "./SkidMarkSystem.js";
 import { isLocalPart } from "../lib/playerParts.js";
 import type { SplitResultMessage } from "@spherio/shared";
+import { InputSender } from "../net/inputSender.js";
+import { ServerClock } from "../net/serverClock.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ArenaState = any;
@@ -71,7 +79,6 @@ export class Game {
   private playerName = "Игрок";
   private lastState: ArenaState | null = null;
   private hadLocalPart = false;
-  private killFeedLastSeq = 0;
   private spectating = false;
   private intentionalLeave = false;
   private menuOpen = false;
@@ -80,6 +87,10 @@ export class Game {
   private readonly matchEnd = new MatchEndOverlay();
   private readonly predictor = new LocalPredictor();
   private skidMarks!: SkidMarkSystem;
+  private hasPendingPatch = false;
+  private latestPatchServerTime = 0;
+  private readonly serverClock = new ServerClock();
+  private readonly inputSender = new InputSender();
 
   constructor(private canvas: HTMLCanvasElement) {
     this.engine = new Engine(canvas, true, {
@@ -107,11 +118,25 @@ export class Game {
         ),
     });
     this.room = room;
+    attachRoomPing(room);
     this.localId = room.sessionId;
     this.playerName = playerName;
+    this.serverClock.reset();
+    this.hasPendingPatch = true;
+    this.latestPatchServerTime = 0;
+    this.inputSender.reset();
     getChatUi().bindRoom(room, playerName);
     room.onStateChange((state: ArenaState) => {
       this.lastState = state;
+      const st = typeof state.serverTime === "number" ? state.serverTime : 0;
+      if (st > 0) {
+        this.serverClock.onServerTime(st);
+        this.latestPatchServerTime = st;
+      }
+      this.hasPendingPatch = true;
+    });
+    room.onMessage("kill", (msg: KillFeedEntry) => {
+      this.killFeed.push([msg]);
     });
     room.onMessage("match_end", (msg: MatchEndMessage) => {
       if (this.intentionalLeave || !document.body.classList.contains("in-game")) {
@@ -159,16 +184,38 @@ export class Game {
         const input = this.input.getInput(axes);
         if (!this.menuOpen && !this.matchEndVisible()) {
           this.predictor.setInputForSession(this.localId, input);
-          this.room.send("input", input);
+          this.inputSender.send(this.room, input, now);
           if (this.input.consumeSplit()) {
+            this.inputSender.flush(this.room);
             this.room.send("split", { moveX: input.moveX, moveZ: input.moveZ });
           }
         }
+        tickRoomPing(this.room, now);
         const state = this.lastState ?? this.room.state;
         if (state) {
+          const ping = getPing(this.room);
           const players: PlayerSnap[] = [];
           state.players.forEach((p: PlayerSnap) => {
-            players.push({ ...p });
+            players.push({
+              id: p.id,
+              x: p.x,
+              y: p.y,
+              z: p.z,
+              vx: p.vx,
+              vz: p.vz,
+              qx: p.qx,
+              qy: p.qy,
+              qz: p.qz,
+              qw: p.qw,
+              radius: p.radius,
+              color: p.color,
+              skinId: p.skinId,
+              name: p.name,
+              invulnUntil: p.invulnUntil,
+              targetId: p.targetId,
+              targetExpiresAt: p.targetExpiresAt,
+              braking: p.braking,
+            });
           });
 
           const seen = new Set<string>();
@@ -179,25 +226,36 @@ export class Game {
             }
           }
           this.predictor.prune(seen, this.localId);
-          this.predictor.simulate(dtSec);
 
-          const pellets: {
-            id: string;
-            x: number;
-            y: number;
-            z: number;
-            kind: number;
-          }[] = [];
-          for (let i = 0; i < state.pellets.length; i++) {
-            const p = state.pellets[i];
-            pellets.push({
-              id: p.id,
-              x: p.x,
-              y: p.y,
-              z: p.z,
-              kind: typeof p.kind === "number" ? p.kind : 0,
-            });
+          if (this.hasPendingPatch && this.latestPatchServerTime > 0) {
+            for (const p of players) {
+              if (isLocalPart(p.id, this.localId)) {
+                this.predictor.reconcilePart(p.id, p);
+              }
+            }
+            this.entities.ingestPlayersPatch(players, this.latestPatchServerTime);
+            const pellets: {
+              id: string;
+              x: number;
+              y: number;
+              z: number;
+              kind: number;
+            }[] = [];
+            for (let i = 0; i < state.pellets.length; i++) {
+              const p = state.pellets[i];
+              pellets.push({
+                id: p.id,
+                x: p.x,
+                y: p.y,
+                z: p.z,
+                kind: typeof p.kind === "number" ? p.kind : 0,
+              });
+            }
+            this.entities.syncPellets(pellets);
+            this.hasPendingPatch = false;
           }
+
+          this.predictor.simulate(dtSec);
 
           const hedgehogs: {
             id: string;
@@ -227,6 +285,7 @@ export class Game {
               });
             }
           }
+          this.entities.syncHedgehogs(hedgehogs);
 
           const me = pickLargestLocalPart(players, this.localId);
           const hasLocal = !!me;
@@ -239,17 +298,14 @@ export class Game {
           }
           this.hadLocalPart = hasLocal || this.hadLocalPart;
 
-          const ping = this.room ? getPing(this.room) : 0;
           const local = this.entities.syncPlayers(
             players,
             this.localId,
-            now,
+            this.serverClock.estimateNow(),
             dtSec,
             this.predictor,
             ping,
           );
-          this.entities.syncPellets(pellets);
-          this.entities.syncHedgehogs(hedgehogs);
 
           const localBrake = !this.menuOpen && this.input.brake;
           this.skidMarks.update(
@@ -288,28 +344,6 @@ export class Game {
             }
           }
           this.camera.follow(camTarget, camRadius, hasLocal && !this.spectating);
-
-          const feed: KillFeedEntry[] = [];
-          for (let i = 0; i < state.killFeed.length; i++) {
-            const e = state.killFeed[i];
-            const seq = typeof e.seq === "number" ? e.seq : 0;
-            if (seq > this.killFeedLastSeq) {
-              feed.push({
-                killerName: e.killerName,
-                victimName: e.victimName,
-                at: e.at,
-                seq,
-              });
-            }
-          }
-          if (feed.length > 0) {
-            feed.sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
-            this.killFeed.push(feed);
-            this.killFeedLastSeq = Math.max(
-              this.killFeedLastSeq,
-              ...feed.map((e) => e.seq ?? 0),
-            );
-          }
 
           updateHud(
             me
@@ -388,9 +422,9 @@ export class Game {
   }
 
   dispose(): void {
+    detachRoomPing(this.room);
     this.engine.stopRenderLoop();
     this.killFeed.clear();
-    this.killFeedLastSeq = 0;
     this.matchEnd.hide();
     this.death.hide();
     this.entities.dispose();

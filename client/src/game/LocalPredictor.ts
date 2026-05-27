@@ -38,19 +38,35 @@ export class LocalPredictor {
       radius: number;
     },
   ): void {
+    if (this.parts.has(id)) return;
+    this.parts.set(id, {
+      body: kinematicBodyFromSnap(snap.x, snap.y, snap.z, snap.vx, snap.vz, snap.radius),
+      input: { moveX: 0, moveZ: 0, brake: false, boost: false },
+    });
+  }
+
+  /** Подтягивание к серверу только на патче (~30 Гц), не каждый кадр рендера. */
+  reconcilePart(
+    id: string,
+    snap: {
+      x: number;
+      y: number;
+      z: number;
+      vx: number;
+      vz: number;
+      radius: number;
+    },
+  ): void {
     let p = this.parts.get(id);
     if (!p) {
-      p = {
-        body: kinematicBodyFromSnap(snap.x, snap.y, snap.z, snap.vx, snap.vz, snap.radius),
-        input: { moveX: 0, moveZ: 0, brake: false, boost: false },
-      };
-      this.parts.set(id, p);
-      return;
+      this.ensurePart(id, snap);
+      p = this.parts.get(id);
+      if (!p) return;
     }
     const dist = Math.hypot(snap.x - p.body.x, snap.z - p.body.z);
     const rDiff = Math.abs(snap.radius - p.body.radius);
     const hardSnap = dist > 6 || rDiff > 1.2;
-    const blend = hardSnap ? 1 : 0.35;
+    const blend = hardSnap ? 1 : 0.45;
     reconcileKinematic(
       p.body,
       snap.x,

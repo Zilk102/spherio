@@ -16,6 +16,9 @@ export class VirtualJoystick {
     if (!zone || !knob) throw new Error("Joystick elements not found");
     this.zone = zone;
     this.knob = knob;
+    this.syncRadius();
+    const ro = new ResizeObserver(() => this.syncRadius());
+    ro.observe(zone);
 
     this.zone.addEventListener("pointerdown", (e) => this.onDown(e));
     this.zone.addEventListener("pointermove", (e) => this.onMove(e));
@@ -23,8 +26,14 @@ export class VirtualJoystick {
     this.zone.addEventListener("pointercancel", (e) => this.onUp(e));
   }
 
+  private syncRadius(): void {
+    const size = Math.min(this.zone.clientWidth, this.zone.clientHeight);
+    this.maxRadius = Math.max(36, size * 0.38);
+  }
+
   private onDown(e: PointerEvent): void {
     if (this.active) return;
+    this.syncRadius();
     this.active = true;
     this.pointerId = e.pointerId;
     this.zone.setPointerCapture(e.pointerId);

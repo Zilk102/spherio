@@ -1,4 +1,4 @@
-FROM node:22-bookworm-slim AS build
+FROM public.ecr.aws/docker/library/node:22-bookworm-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY shared/package.json ./shared/
@@ -9,7 +9,7 @@ COPY shared ./shared
 COPY server ./server
 RUN npm run build -w @spherio/shared && npm run build -w @spherio/server
 
-FROM node:22-bookworm-slim
+FROM public.ecr.aws/docker/library/node:22-bookworm-slim
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json ./

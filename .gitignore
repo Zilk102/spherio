@@ -3,3 +3,7 @@ dist/
 .env
 *.log
 .DS_Store
+deploy/keys/
+deploy/secrets/.env.production
+deploy/secrets/mail.local
+deploy/secrets/CREDENTIALS.txt

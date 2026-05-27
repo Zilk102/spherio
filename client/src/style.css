@@ -20,6 +20,7 @@
   --safe-l: env(safe-area-inset-left, 0px);
   --chat-offset: 96px;
   --z-chat: 25;
+  --z-controls: 30;
 }
 
 * {
@@ -41,10 +42,23 @@ body {
 }
 
 #renderCanvas {
+  position: fixed;
+  inset: 0;
   width: 100%;
   height: 100%;
   display: block;
   touch-action: none;
+  image-rendering: auto;
+  z-index: 0;
+}
+
+body.in-game #overlay {
+  z-index: 20;
+}
+
+body.in-game--touch #renderCanvas {
+  pointer-events: none;
+  image-rendering: -webkit-optimize-contrast;
 }
 
 #overlay {
@@ -56,6 +70,11 @@ body {
 
 #overlay > * {
   pointer-events: auto;
+}
+
+/* game-ui на весь экран — не перехватывать тапы по HUD/кнопкам */
+#overlay > .game-ui {
+  pointer-events: none;
 }
 
 .hidden {
@@ -239,7 +258,7 @@ body {
 .in-game-menu {
   position: fixed;
   inset: 0;
-  z-index: 18;
+  z-index: 60;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1240,6 +1259,11 @@ body {
   font-weight: 600;
 }
 
+.hud-col--left,
+.hud-col--right {
+  display: contents;
+}
+
 .hud-board-title {
   display: block;
   font-family: var(--font-display);
@@ -1249,6 +1273,11 @@ body {
   letter-spacing: 0.06em;
   color: var(--text-muted);
   margin-bottom: 4px;
+}
+
+.hud-board-title--compact {
+  margin-bottom: 2px;
+  font-size: 0.65rem;
 }
 
 .invite-link {
@@ -1304,6 +1333,10 @@ body {
   margin-top: 4px;
 }
 
+.hud-ping.hidden {
+  display: none;
+}
+
 .hud-keys {
   width: 100%;
   font-size: 0.68rem;
@@ -1338,12 +1371,6 @@ body {
 
 .hud-leave:active {
   transform: translateY(1px);
-}
-
-/* На тач-устройствах в нижнем правом углу живёт кластер boost/brake —
-   поднимаем кнопку «Меню» над ним, чтобы не перекрывалась. */
-body.in-game--touch .hud-leave {
-  bottom: calc(160px + env(safe-area-inset-bottom, 0px));
 }
 
 .match-end {
@@ -1861,10 +1888,11 @@ body.in-game--touch .chat-wrap {
 
 /* ─── Touch controls ─── */
 .controls {
-  position: absolute;
+  position: fixed;
   bottom: 0;
   left: 0;
   right: 0;
+  z-index: var(--z-controls);
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
@@ -1908,6 +1936,10 @@ body.in-game--touch .chat-wrap {
   display: flex;
   gap: 8px;
   align-items: flex-end;
+}
+
+.action-stack {
+  display: contents;
 }
 
 .action-btn {
@@ -2020,5 +2052,381 @@ body.in-game--touch .chat-wrap {
   }
   .play-hero {
     padding: 14px;
+  }
+}
+
+/* ─── Touch in-game: компактный HUD + зона управления ─── */
+body.in-game--touch {
+  --touch-edge: max(6px, env(safe-area-inset-top, 0px));
+  --touch-edge-l: max(6px, env(safe-area-inset-left, 0px));
+  --touch-edge-r: max(6px, env(safe-area-inset-right, 0px));
+  --touch-timer-h: 38px;
+  --touch-controls-h: min(38vh, 210px);
+  --touch-killfeed-top: calc(var(--touch-edge) + var(--touch-timer-h) + 6px);
+}
+
+body.in-game--touch .hud {
+  position: fixed;
+  inset: 0;
+  display: block;
+  pointer-events: none;
+}
+
+body.in-game--touch .hud-col--left,
+body.in-game--touch .hud-col--right {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: fixed;
+  z-index: 14;
+  pointer-events: none;
+}
+
+body.in-game--touch .hud-col--left {
+  top: var(--touch-edge);
+  left: var(--touch-edge-l);
+  align-items: stretch;
+  max-width: min(148px, 38vw);
+}
+
+body.in-game--touch .hud-col--right {
+  top: calc(var(--touch-edge) + 50px);
+  right: var(--touch-edge-r);
+  align-items: stretch;
+  width: min(112px, 30vw);
+  pointer-events: none;
+  z-index: 14;
+}
+
+body.in-game--touch .hud-card {
+  backdrop-filter: none;
+  background: rgba(8, 14, 26, 0.9);
+  border-color: rgba(100, 200, 255, 0.22);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  position: static;
+  width: 100%;
+  margin: 0;
+}
+
+body.in-game--touch .hud-card--player {
+  padding: 8px 11px;
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+body.in-game--touch .hud-name {
+  display: inline;
+  font-size: 15px;
+  margin-right: 6px;
+}
+
+body.in-game--touch .hud-stats {
+  display: inline;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+body.in-game--touch .hud-target {
+  position: static;
+  margin: 0;
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1.3;
+  white-space: normal;
+  overflow: hidden;
+  max-width: 100%;
+}
+
+body.in-game--touch .hud-target-icon,
+body.in-game--touch .hud-target-sep {
+  display: none;
+}
+
+body.in-game--touch .hud-card--board {
+  padding: 6px 8px;
+  pointer-events: none;
+}
+
+body.in-game--touch .hud-leader {
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+body.in-game--touch .lb-row {
+  padding: 2px 0;
+  gap: 4px;
+  border-bottom: none;
+}
+
+body.in-game--touch .lb-row span:first-child {
+  width: 0.9rem;
+  font-size: 10px;
+}
+
+body.in-game--touch .lb-row em {
+  font-size: 11px;
+}
+
+body.in-game--touch .hud-keys {
+  display: none;
+}
+
+body.in-game--touch .hud-leave {
+  position: fixed;
+  top: var(--touch-edge);
+  right: var(--touch-edge-r);
+  bottom: auto;
+  left: auto;
+  z-index: 50;
+  width: auto;
+  min-width: 84px;
+  margin: 0;
+  padding: 10px 14px;
+  font-size: 14px;
+  min-height: 44px;
+  text-align: center;
+  pointer-events: auto;
+  touch-action: manipulation;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body.in-game--touch .hud-timer {
+  top: var(--touch-edge);
+  padding: 4px 14px;
+  z-index: 15;
+}
+
+body.in-game--touch .hud-timer-label {
+  display: none;
+}
+
+body.in-game--touch .hud-timer-value {
+  font-size: 1.05rem;
+}
+
+body.in-game--touch .killfeed {
+  position: fixed;
+  top: var(--touch-killfeed-top);
+  left: 50%;
+  right: auto;
+  transform: translateX(-50%);
+  width: min(220px, 54vw);
+  max-width: min(220px, 54vw);
+  text-align: center;
+  font-size: 11px;
+  z-index: 13;
+  pointer-events: none;
+}
+
+body.in-game--touch .killfeed-line {
+  padding: 4px 10px;
+  margin-bottom: 4px;
+  display: inline-block;
+}
+
+body.in-game--touch .chat-wrap {
+  bottom: calc(var(--touch-controls-h) + 10px);
+  left: max(8px, env(safe-area-inset-left, 0px));
+  top: auto;
+  --chat-offset: 0;
+}
+
+body.in-game--touch .chat-toggle {
+  width: 48px;
+  height: 48px;
+}
+
+body.in-game--touch .controls {
+  height: auto;
+  min-height: var(--touch-controls-h);
+  align-items: flex-end;
+  padding: 8px 10px max(10px, env(safe-area-inset-bottom, 0px));
+}
+
+body.in-game--touch .joystick-zone {
+  --joy-size: min(152px, 40vw, 24vh);
+  flex: 0 0 var(--joy-size);
+  width: var(--joy-size);
+  height: var(--joy-size);
+  min-width: var(--joy-size);
+  min-height: var(--joy-size);
+  max-width: var(--joy-size);
+  max-height: var(--joy-size);
+  aspect-ratio: 1;
+  align-self: flex-end;
+  margin-left: max(0px, env(safe-area-inset-left, 0px));
+}
+
+body.in-game--touch .action-cluster {
+  flex: 0 0 auto;
+  align-items: flex-end;
+  align-self: flex-end;
+  gap: 10px;
+  margin-right: max(0px, env(safe-area-inset-right, 0px));
+  padding-right: max(0px, env(safe-area-inset-right, 0px));
+}
+
+body.in-game--touch .action-stack--right {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+body.in-game--touch .action-btn {
+  flex: 0 0 auto;
+  width: min(20vw, 76px);
+  height: min(20vw, 76px);
+  aspect-ratio: 1;
+}
+
+body.in-game--touch .action-btn kbd {
+  font-size: 1.1rem;
+}
+
+body.in-game--touch .action-btn span {
+  font-size: 0.65rem;
+}
+
+/* Альбомная ориентация */
+@media (orientation: landscape) and (max-height: 520px) {
+  body.in-game--touch {
+    --touch-controls-h: min(72vh, 200px);
+    --touch-timer-h: 34px;
+  }
+
+  body.in-game--touch .hud-col--left {
+    max-width: min(240px, 38vw);
+  }
+
+  body.in-game--touch .hud-col--right {
+    width: 112px;
+  }
+
+  body.in-game--touch .hud-card--board {
+    max-height: calc(100vh - var(--touch-controls-h) - 56px);
+    overflow-y: auto;
+  }
+
+  body.in-game--touch .chat-wrap {
+    top: auto;
+    bottom: calc(var(--touch-controls-h) + 8px);
+    left: var(--touch-edge-l);
+  }
+
+  body.in-game--touch .joystick-zone {
+    --joy-size: min(132px, 22vh, 20vw);
+  }
+
+  body.in-game--touch .action-btn {
+    width: min(16vh, 68px);
+    height: min(16vh, 68px);
+  }
+}
+
+/* Портрет */
+@media (orientation: portrait) {
+  body.in-game--touch {
+    --touch-timer-h: 36px;
+    --touch-killfeed-top: calc(var(--touch-edge) + var(--touch-timer-h) + 8px);
+    --touch-controls-h: min(34vh, 200px);
+  }
+
+  body.in-game--touch .hud-col--left {
+    max-width: min(136px, 35vw);
+  }
+
+  body.in-game--touch .hud-col--right {
+    width: min(108px, 29vw);
+  }
+
+  body.in-game--touch .hud-name,
+  body.in-game--touch .hud-stats {
+    display: block;
+  }
+
+  body.in-game--touch .hud-name {
+    margin-right: 0;
+    margin-bottom: 2px;
+  }
+
+  body.in-game--touch .hud-timer {
+    max-width: 46vw;
+  }
+
+  body.in-game--touch .killfeed {
+    width: min(200px, 50vw);
+    max-width: min(200px, 50vw);
+  }
+
+  body.in-game--touch .chat-wrap {
+    top: auto;
+    right: var(--touch-edge-r);
+    left: auto;
+    bottom: calc(var(--touch-controls-h) + 12px);
+  }
+
+  body.in-game--touch .joystick-zone {
+    --joy-size: min(148px, 38vw, 22vh);
+  }
+
+  body.in-game--touch .action-btn {
+    width: min(21vw, 74px);
+    height: min(21vw, 74px);
+  }
+
+  body.in-game--touch .match-end-card {
+    min-width: 0;
+    width: min(360px, 92vw);
+    padding: 22px 18px;
+  }
+}
+
+/* ─── Узкие экраны: меню и формы ─── */
+@media (max-width: 767px) {
+  .welcome-header {
+    padding-left: max(14px, env(safe-area-inset-left, 0px));
+    padding-right: max(14px, env(safe-area-inset-right, 0px));
+  }
+
+  .welcome-body {
+    padding-left: max(14px, env(safe-area-inset-left, 0px));
+    padding-right: max(14px, env(safe-area-inset-right, 0px));
+    max-width: none;
+  }
+
+  .play-hero {
+    padding: 18px 16px;
+  }
+
+  .nick-input,
+  .lobby-code-input,
+  .auth-input {
+    font-size: 16px;
+    min-height: 48px;
+  }
+
+  .cta-play {
+    min-height: 52px;
+    font-size: 1.05rem;
+  }
+
+  .quick-actions button,
+  .auth-tabs button,
+  .drawer-nav button {
+    min-height: 44px;
+    font-size: 0.92rem;
+  }
+
+  .drawer-sheet {
+    max-height: min(88vh, 720px);
+    padding-bottom: max(16px, env(safe-area-inset-bottom, 0px));
+  }
+
+  .user-pill {
+    max-width: 46vw;
+    font-size: 0.78rem;
+    padding: 10px 12px;
   }
 }

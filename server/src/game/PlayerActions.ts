@@ -1,11 +1,6 @@
 import { BOOST_MASS_DRAIN_PER_SEC, MIN_RADIUS } from "@spherio/shared";
 import { massFromRadius, radiusFromMass } from "@spherio/shared";
 import type { PhysicsWorld } from "./PhysicsWorld.js";
-import { ArenaState, KillFeedEntryState } from "../schema/ArenaState.js";
-
-export const KILL_FEED_MAX = 16;
-
-let killFeedSeq = 0;
 
 export function handleBoost(
   physics: PhysicsWorld,
@@ -41,22 +36,5 @@ export function applyBoostMassDrain(
         physics.setRadius(partId, newR);
       }
     }
-  }
-}
-
-export function pushKillFeed(
-  state: ArenaState,
-  killerName: string,
-  victimName: string,
-  at: number,
-): void {
-  const row = new KillFeedEntryState();
-  row.killerName = killerName;
-  row.victimName = victimName;
-  row.at = at;
-  row.seq = ++killFeedSeq;
-  state.killFeed.push(row);
-  while (state.killFeed.length > KILL_FEED_MAX) {
-    state.killFeed.shift();
   }
 }

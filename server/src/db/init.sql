@@ -10,6 +10,9 @@ CREATE TABLE IF NOT EXISTS users (
   -- можно позже мигрировать на text[] + GIN (owned_skin_ids @> ARRAY['skin_id']).
   owned_skin_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
   is_guest BOOLEAN NOT NULL DEFAULT false,
+  email_verified BOOLEAN NOT NULL DEFAULT false,
+  email_verification_token_hash TEXT,
+  email_verification_expires_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CONSTRAINT users_email_guest_chk CHECK (
     (is_guest = true AND email IS NULL AND password_hash IS NULL)

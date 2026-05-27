@@ -7,6 +7,7 @@ import type {
   PatchProfileRequest,
   RefreshRequest,
   RegisterRequest,
+  ResendVerificationRequest,
   ShopBuyRequest,
 } from "@spherio/shared";
 import {
@@ -16,6 +17,8 @@ import {
   patchProfile,
   refreshAuth,
   register,
+  resendVerificationEmail,
+  verifyEmail,
   verifyToken,
 } from "../services/auth.js";
 import { addFriend, listFriends } from "../services/friends.js";
@@ -61,12 +64,45 @@ export function mountApiRoutes(app: Express): void {
         res.status(400).json({ error: "invalid_credentials" });
         return;
       }
+      if (msg === "smtp_not_configured") {
+        res.status(503).json({ error: "smtp_not_configured" });
+        return;
+      }
       if (code === "23505") {
         res.status(409).json({ error: "email_taken" });
         return;
       }
       console.error("[API] auth/register", e);
       res.status(500).json({ error: "register_failed" });
+    }
+  });
+
+  app.get("/api/auth/verify-email", async (req, res) => {
+    try {
+      const token = String(req.query.token ?? "");
+      res.json(await verifyEmail(token));
+    } catch (e) {
+      console.error("[API] auth/verify-email", e);
+      res.status(500).json({ ok: false, error: "verify_failed" });
+    }
+  });
+
+  app.post("/api/auth/resend-verification", async (req, res) => {
+    try {
+      const body = req.body as ResendVerificationRequest;
+      res.json(await resendVerificationEmail(body?.email ?? ""));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "";
+      if (msg === "invalid_credentials") {
+        res.status(400).json({ error: "invalid_credentials" });
+        return;
+      }
+      if (msg === "smtp_not_configured") {
+        res.status(503).json({ error: "smtp_not_configured" });
+        return;
+      }
+      console.error("[API] auth/resend-verification", e);
+      res.status(500).json({ error: "resend_failed" });
     }
   });
 
@@ -80,6 +116,11 @@ export function mountApiRoutes(app: Express): void {
       }
       res.json(auth);
     } catch (e) {
+      const msg = e instanceof Error ? e.message : "";
+      if (msg === "email_not_verified") {
+        res.status(403).json({ error: "email_not_verified" });
+        return;
+      }
       console.error("[API] auth/login", e);
       res.status(500).json({ error: "login_failed" });
     }

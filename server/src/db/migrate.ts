@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { pool } from "./pool.js";
@@ -22,6 +22,20 @@ export async function migrate(opts: { retries?: number } = {}): Promise<void> {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       await pool.query(sql);
+      const migDir = join(__dirname, "migrations");
+      try {
+        const files = readdirSync(migDir)
+          .filter((f) => f.endsWith(".sql"))
+          .sort();
+        for (const f of files) {
+          const migSql = readFileSync(join(migDir, f), "utf8");
+          await pool.query(migSql);
+          console.log(`[DB] Миграция ${f}`);
+        }
+      } catch (e) {
+        const code = e && typeof e === "object" && "code" in e ? (e as NodeJS.ErrnoException).code : "";
+        if (code !== "ENOENT") throw e;
+      }
       console.log(`[DB] Схема применена (попытка ${attempt})`);
       return;
     } catch (err) {

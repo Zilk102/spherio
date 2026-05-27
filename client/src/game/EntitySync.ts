@@ -20,12 +20,21 @@ import { createHedgehogMesh } from "./hedgehogMesh.js";
 import { attachSkinDecal, disposeSkinMaterials, getSphereBaseMaterial } from "./skinTextures.js";
 import { isLocalPart } from "../lib/playerParts.js";
 import type { LocalPredictor } from "./LocalPredictor.js";
+import {
+  netSampleFromPlayer,
+  pushNetPair,
+  sampleNetPair,
+  type NetPair,
+} from "./netSnap.js";
+import { interpDelayMs } from "../net/serverClock.js";
 
 interface PlayerSnap {
   id: string;
   x: number;
   y: number;
   z: number;
+  vx: number;
+  vz: number;
   qx: number;
   qy: number;
   qz: number;
@@ -68,15 +77,6 @@ interface SmoothState {
   radius: number;
 }
 
-/** Базовая задержка рендера ~2 тика при 30 Hz патчах */
-const INTERP_DELAY_BASE_MS = 66;
-const INTERP_DELAY_MAX_MS = 180;
-
-function interpDelayMs(pingMs: number): number {
-  return Math.min(INTERP_DELAY_MAX_MS, Math.max(INTERP_DELAY_BASE_MS, INTERP_DELAY_BASE_MS + pingMs * 0.55));
-}
-const HISTORY_MAX_MS = 400;
-const SNAP_EPS = 0.008;
 /** Чуть выше пола, ниже дна сферы (дно ≈ GROUND_Y + 0.02) */
 const SHADOW_Y = GROUND_Y + 0.004;
 /** Фиксированный размер плашки в мире (не зависит от scale шара) */
@@ -89,28 +89,20 @@ export class EntitySync {
   private shadows = new Map<string, Mesh>();
   private labels = new Map<string, Mesh>();
   private labelTextures = new Map<string, DynamicTexture>();
+  private labelNames = new Map<string, string>();
   private pellets = new Map<string, Mesh>();
   private pelletMats = new Map<PelletKind, StandardMaterial>();
   private hedgehogs = new Map<string, TransformNode>();
   private playerMatKeys = new Map<string, string>();
+  private readonly playerSeen = new Set<string>();
   private shadowMat: StandardMaterial;
   private targetIndicator: TransformNode | null = null;
   private targetIndicatorMat: StandardMaterial | null = null;
   private smooth = new Map<string, SmoothState>();
-  private history = new Map<
-    string,
-    {
-      t: number;
-      x: number;
-      y: number;
-      z: number;
-      qx: number;
-      qy: number;
-      qz: number;
-      qw: number;
-      radius: number;
-    }[]
-  >();
+  private netPairs = new Map<string, NetPair>();
+  private readonly _qA = new Quaternion();
+  private readonly _qB = new Quaternion();
+  private readonly _qOut = new Quaternion();
 
   constructor(private scene: Scene) {
     this.shadowMat = new StandardMaterial("blobShadow", scene);
@@ -234,6 +226,14 @@ export class EntitySync {
     return root;
   }
 
+  /** Снимки игроков с патча (~30 Гц) — не в render loop на каждом кадре. */
+  ingestPlayersPatch(players: PlayerSnap[], serverTimeMs: number): void {
+    if (!Number.isFinite(serverTimeMs) || serverTimeMs <= 0) return;
+    for (const p of players) {
+      pushNetPair(this.netPairs, p.id, netSampleFromPlayer(p, serverTimeMs));
+    }
+  }
+
   syncPlayers(
     list: PlayerSnap[],
     localId: string | null,
@@ -242,10 +242,11 @@ export class EntitySync {
     predictor: LocalPredictor | null = null,
     pingMs = 0,
   ): Mesh | null {
-    const seen = new Set<string>();
+    const renderT = now - interpDelayMs(pingMs);
+    const seen = this.playerSeen;
+    seen.clear();
     let localNode: Mesh | null = null;
     let localBestR = 0;
-    const renderT = now - interpDelayMs(pingMs);
 
     for (const p of list) {
       seen.add(p.id);
@@ -255,7 +256,7 @@ export class EntitySync {
       if (!node) {
         node = MeshBuilder.CreateSphere(
           `player_${p.id}`,
-          { diameter: 1, segments: 32 },
+          { diameter: 1, segments: 16 },
           this.scene,
         );
         node.rotationQuaternion = Quaternion.Identity();
@@ -282,20 +283,23 @@ export class EntitySync {
           qw: p.qw,
           radius: p.radius,
         });
-        this.history.set(p.id, []);
+        pushNetPair(this.netPairs, p.id, netSampleFromPlayer(p, now));
 
         if (!isLocalPart(p.id, localId)) {
           const label = this.createNameLabel(p.id, p.name);
           this.labels.set(p.id, label);
+          this.labelNames.set(p.id, p.name);
         }
-      } else {
+      } else if (
+        !isLocalPart(p.id, localId) &&
+        this.labelNames.get(p.id) !== p.name
+      ) {
         this.updateNameLabel(p.id, p.name);
+        this.labelNames.set(p.id, p.name);
       }
 
-      const hist = this.history.get(p.id)!;
-      this.pushHistory(hist, now, p);
-
-      const target = this.interpolate(hist, renderT) ?? p;
+      const pair = this.netPairs.get(p.id);
+      const target = pair ? sampleNetPair(pair, renderT) : p;
       const s = this.smooth.get(p.id)!;
       const isLocal = isLocalPart(p.id, localId);
       const pred = isLocal && predictor ? predictor.getPredicted(p.id) : undefined;
@@ -308,44 +312,31 @@ export class EntitySync {
         s.z = pred.body.z;
         s.radius = pred.body.radius;
         const blendQ = 1 - Math.exp(-28 * dtSec);
-        const cq = new Quaternion(s.qx, s.qy, s.qz, s.qw);
-        const tq = new Quaternion(target.qx, target.qy, target.qz, target.qw);
-        const oq = Quaternion.Slerp(cq, tq, blendQ);
-        s.qx = oq.x;
-        s.qy = oq.y;
-        s.qz = oq.z;
-        s.qw = oq.w;
-      } else if (isLocal) {
-        const blend = 1 - Math.exp(-32 * dtSec);
+        this._qA.set(s.qx, s.qy, s.qz, s.qw);
+        this._qB.set(target.qx, target.qy, target.qz, target.qw);
+        Quaternion.SlerpToRef(this._qA, this._qB, blendQ, this._qOut);
+        s.qx = this._qOut.x;
+        s.qy = this._qOut.y;
+        s.qz = this._qOut.z;
+        s.qw = this._qOut.w;
+      } else {
+        const blend = 1 - Math.exp(-36 * dtSec);
         s.x += (target.x - s.x) * blend;
         s.y += (target.y - s.y) * blend;
         s.z += (target.z - s.z) * blend;
         s.radius += (target.radius - s.radius) * blend;
-        const cq = new Quaternion(s.qx, s.qy, s.qz, s.qw);
-        const tq = new Quaternion(target.qx, target.qy, target.qz, target.qw);
-        const oq = Quaternion.Slerp(cq, tq, blend);
-        s.qx = oq.x;
-        s.qy = oq.y;
-        s.qz = oq.z;
-        s.qw = oq.w;
-      } else {
-        s.x = target.x;
-        s.y = target.y;
-        s.z = target.z;
-        s.radius = target.radius;
-        const cq = new Quaternion(s.qx, s.qy, s.qz, s.qw);
-        const tq = new Quaternion(target.qx, target.qy, target.qz, target.qw);
-        const oq = Quaternion.Slerp(cq, tq, Math.min(1, dtSec * 14));
-        s.qx = oq.x;
-        s.qy = oq.y;
-        s.qz = oq.z;
-        s.qw = oq.w;
+        this._qA.set(s.qx, s.qy, s.qz, s.qw);
+        this._qB.set(target.qx, target.qy, target.qz, target.qw);
+        Quaternion.SlerpToRef(this._qA, this._qB, blend, this._qOut);
+        s.qx = this._qOut.x;
+        s.qy = this._qOut.y;
+        s.qz = this._qOut.z;
+        s.qw = this._qOut.w;
       }
 
-      const oq = new Quaternion(s.qx, s.qy, s.qz, s.qw);
-
       node.position.set(s.x, s.y, s.z);
-      node.rotationQuaternion = oq;
+      if (!node.rotationQuaternion) node.rotationQuaternion = Quaternion.Identity();
+      node.rotationQuaternion.set(s.qx, s.qy, s.qz, s.qw);
       const scale = s.radius * 2;
       node.scaling.set(scale, scale, scale);
 
@@ -383,150 +374,22 @@ export class EntitySync {
     for (const [id, node] of this.players) {
       if (!seen.has(id)) {
         this.disposeDecal(id);
-        node.dispose();
-        this.shadows.get(id)?.dispose();
-        this.labels.get(id)?.dispose();
+        node.dispose(false, false);
+        this.shadows.get(id)?.dispose(false, false);
+        this.labels.get(id)?.dispose(true, true);
         this.labelTextures.get(id)?.dispose();
         this.players.delete(id);
         this.shadows.delete(id);
         this.labels.delete(id);
         this.labelTextures.delete(id);
+        this.labelNames.delete(id);
         this.smooth.delete(id);
-        this.history.delete(id);
+        this.netPairs.delete(id);
         this.playerMatKeys.delete(id);
       }
     }
 
     return localNode;
-  }
-
-  private pushHistory(
-    hist: {
-      t: number;
-      x: number;
-      y: number;
-      z: number;
-      qx: number;
-      qy: number;
-      qz: number;
-      qw: number;
-      radius: number;
-    }[],
-    t: number,
-    p: PlayerSnap,
-  ): void {
-    const last = hist[hist.length - 1];
-    if (last) {
-      const moved =
-        Math.hypot(last.x - p.x, last.z - p.z) > SNAP_EPS ||
-        Math.abs(last.y - p.y) > SNAP_EPS * 0.5 ||
-        Math.abs(last.radius - p.radius) > SNAP_EPS * 0.5;
-      const qDot = Math.abs(last.qx * p.qx + last.qy * p.qy + last.qz * p.qz + last.qw * p.qw);
-      const rotated = qDot < 0.9995;
-      if (!moved && !rotated && t - last.t < 40) return;
-    }
-    hist.push({
-      t,
-      x: p.x,
-      y: p.y,
-      z: p.z,
-      qx: p.qx,
-      qy: p.qy,
-      qz: p.qz,
-      qw: p.qw,
-      radius: p.radius,
-    });
-    while (hist.length > 2 && hist[0].t < t - HISTORY_MAX_MS) hist.shift();
-  }
-
-  private extrapolate(
-    a: {
-      t: number;
-      x: number;
-      y: number;
-      z: number;
-      qx: number;
-      qy: number;
-      qz: number;
-      qw: number;
-      radius: number;
-    },
-    b: {
-      t: number;
-      x: number;
-      y: number;
-      z: number;
-      qx: number;
-      qy: number;
-      qz: number;
-      qw: number;
-      radius: number;
-    },
-    renderT: number,
-  ): SmoothState {
-    const dtSec = Math.max(0.001, (b.t - a.t) / 1000);
-    const ahead = Math.min(0.1, Math.max(0, (renderT - b.t) / 1000));
-    const vx = (b.x - a.x) / dtSec;
-    const vy = (b.y - a.y) / dtSec;
-    const vz = (b.z - a.z) / dtSec;
-    const cq = new Quaternion(a.qx, a.qy, a.qz, a.qw);
-    const bq = new Quaternion(b.qx, b.qy, b.qz, b.qw);
-    const oq = Quaternion.Slerp(cq, bq, 1);
-    return {
-      x: b.x + vx * ahead,
-      y: b.y + vy * ahead,
-      z: b.z + vz * ahead,
-      qx: oq.x,
-      qy: oq.y,
-      qz: oq.z,
-      qw: oq.w,
-      radius: b.radius + ((b.radius - a.radius) / dtSec) * ahead,
-    };
-  }
-
-  private interpolate(
-    hist: {
-      t: number;
-      x: number;
-      y: number;
-      z: number;
-      qx: number;
-      qy: number;
-      qz: number;
-      qw: number;
-      radius: number;
-    }[],
-    renderT: number,
-  ): SmoothState | null {
-    if (hist.length === 0) return null;
-    if (hist.length === 1) return hist[0];
-    let a = hist[0];
-    let b = hist[hist.length - 1];
-    for (let i = 0; i < hist.length - 1; i++) {
-      if (hist[i].t <= renderT && hist[i + 1].t >= renderT) {
-        a = hist[i];
-        b = hist[i + 1];
-        break;
-      }
-    }
-    if (renderT > b.t && hist.length >= 2) {
-      return this.extrapolate(hist[hist.length - 2], b, renderT);
-    }
-    const span = b.t - a.t;
-    const f = span > 1e-3 ? Math.max(0, Math.min(1, (renderT - a.t) / span)) : 1;
-    const cq = new Quaternion(a.qx, a.qy, a.qz, a.qw);
-    const bq = new Quaternion(b.qx, b.qy, b.qz, b.qw);
-    const oq = Quaternion.Slerp(cq, bq, f);
-    return {
-      x: a.x + (b.x - a.x) * f,
-      y: a.y + (b.y - a.y) * f,
-      z: a.z + (b.z - a.z) * f,
-      qx: oq.x,
-      qy: oq.y,
-      qz: oq.z,
-      qw: oq.w,
-      radius: a.radius + (b.radius - a.radius) * f,
-    };
   }
 
   syncPellets(list: PelletSnap[]): void {
@@ -552,7 +415,7 @@ export class EntitySync {
     }
     for (const [id, node] of this.pellets) {
       if (!seen.has(id)) {
-        node.dispose();
+        node.dispose(false, false);
         this.pellets.delete(id);
       }
     }
@@ -654,12 +517,12 @@ export class EntitySync {
   }
 
   dispose(): void {
-    for (const n of this.decals.values()) n.dispose();
-    for (const n of this.players.values()) n.dispose();
-    for (const n of this.shadows.values()) n.dispose();
-    for (const n of this.labels.values()) n.dispose();
+    for (const n of this.decals.values()) n.dispose(false, false);
+    for (const n of this.players.values()) n.dispose(false, false);
+    for (const n of this.shadows.values()) n.dispose(false, false);
+    for (const n of this.labels.values()) n.dispose(true, true);
     for (const t of this.labelTextures.values()) t.dispose();
-    for (const n of this.pellets.values()) n.dispose();
+    for (const n of this.pellets.values()) n.dispose(false, false);
     for (const h of this.hedgehogs.values()) h.dispose(false, true);
     for (const m of this.pelletMats.values()) m.dispose();
     this.shadowMat.dispose();
@@ -674,10 +537,11 @@ export class EntitySync {
     this.shadows.clear();
     this.labels.clear();
     this.labelTextures.clear();
+    this.labelNames.clear();
     this.pellets.clear();
     this.hedgehogs.clear();
     this.pelletMats.clear();
     this.smooth.clear();
-    this.history.clear();
+    this.netPairs.clear();
   }
 }

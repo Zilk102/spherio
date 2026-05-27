@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import {
@@ -11,10 +11,16 @@ import {
   type LoginRequest,
   type PatchProfileRequest,
   type ProfileResponse,
+  type RegisterPendingResponse,
   type RegisterRequest,
+  type ResendVerificationResponse,
+  type VerifyEmailResponse,
 } from "@spherio/shared";
 import { pool } from "../db/pool.js";
 import { ensureStatsRow, getStats } from "./stats.js";
+import { buildVerificationUrl, sendVerificationEmail } from "./mail.js";
+
+const EMAIL_VERIFY_TTL_MS = 24 * 60 * 60 * 1000;
 
 export interface GuestUser {
   userId: string;
@@ -159,7 +165,11 @@ export function getGuest(userId: string): GuestUser | undefined {
   return guests.get(userId);
 }
 
-export async function register(req: RegisterRequest): Promise<AuthResponse> {
+function hashVerifyToken(raw: string): string {
+  return createHash("sha256").update(raw).digest("hex");
+}
+
+export async function register(req: RegisterRequest): Promise<RegisterPendingResponse> {
   if (!pool) throw new Error("database_unavailable");
   const email = req.email?.trim().toLowerCase();
   const password = req.password ?? "";
@@ -173,22 +183,136 @@ export async function register(req: RegisterRequest): Promise<AuthResponse> {
     if (g) ownedSkinIds = mergeOwned(ownedSkinIds, g.ownedSkinIds);
   }
   const passwordHash = await bcrypt.hash(password, 10);
-  const result = await pool.query<{
+  const rawToken = randomBytes(32).toString("hex");
+  const tokenHash = hashVerifyToken(rawToken);
+  const expiresAt = new Date(Date.now() + EMAIL_VERIFY_TTL_MS);
+
+  const client = await pool.connect();
+  let userId: string | null = null;
+  try {
+    await client.query("BEGIN");
+    const result = await client.query<{ id: string }>(
+      `INSERT INTO users (
+         email, password_hash, display_name, equipped_skin_id, owned_skin_ids, is_guest,
+         email_verified, email_verification_token_hash, email_verification_expires_at
+       )
+       VALUES ($1, $2, $3, $4, $5::jsonb, false, false, $6, $7)
+       RETURNING id`,
+      [
+        email,
+        passwordHash,
+        displayName,
+        DEFAULT_SKIN_ID,
+        JSON.stringify(ownedSkinIds),
+        tokenHash,
+        expiresAt,
+      ],
+    );
+    userId = result.rows[0]?.id ?? null;
+    if (!userId) throw new Error("register_failed");
+    await ensureStatsRow(userId, client);
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+
+  if (req.guestUserId) guests.delete(req.guestUserId);
+
+  try {
+    await sendVerificationEmail(email, buildVerificationUrl(rawToken), displayName);
+  } catch (e) {
+    console.error("[auth] verification email failed:", e);
+    return {
+      ok: true,
+      email,
+      message:
+        "Аккаунт создан, но письмо не отправилось. При входе запросите повторную отправку.",
+    };
+  }
+
+  return {
+    ok: true,
+    email,
+    message: "Письмо с подтверждением отправлено. Проверьте почту (и папку «Спам»).",
+  };
+}
+
+export async function verifyEmail(rawToken: string): Promise<VerifyEmailResponse> {
+  if (!pool) throw new Error("database_unavailable");
+  const token = rawToken?.trim();
+  if (!token || token.length < 16) {
+    return { ok: false, error: "invalid_token" };
+  }
+  const tokenHash = hashVerifyToken(token);
+
+  const hit = await pool.query<{ id: string }>(
+    `UPDATE users
+     SET email_verified = true,
+         email_verification_token_hash = NULL,
+         email_verification_expires_at = NULL
+     WHERE email_verification_token_hash = $1
+       AND email_verification_expires_at > NOW()
+       AND is_guest = false
+     RETURNING id`,
+    [tokenHash],
+  );
+  if (hit.rows[0]) return { ok: true };
+
+  const expired = await pool.query(
+    `SELECT 1 FROM users
+     WHERE email_verification_token_hash = $1
+       AND email_verification_expires_at <= NOW()
+       AND is_guest = false`,
+    [tokenHash],
+  );
+  if (expired.rowCount) return { ok: false, error: "expired" };
+
+  return { ok: false, error: "invalid_token" };
+}
+
+export async function resendVerificationEmail(
+  emailRaw: string,
+): Promise<ResendVerificationResponse> {
+  if (!pool) throw new Error("database_unavailable");
+  const email = emailRaw?.trim().toLowerCase();
+  if (!email) throw new Error("invalid_credentials");
+
+  const r = await pool.query<{
     id: string;
     display_name: string;
-    equipped_skin_id: string;
-    owned_skin_ids: string[];
+    email_verified: boolean;
   }>(
-    `INSERT INTO users (email, password_hash, display_name, equipped_skin_id, owned_skin_ids, is_guest)
-     VALUES ($1, $2, $3, $4, $5::jsonb, false)
-     RETURNING id, display_name, equipped_skin_id, owned_skin_ids`,
-    [email, passwordHash, displayName, DEFAULT_SKIN_ID, JSON.stringify(ownedSkinIds)],
+    `SELECT id, display_name, email_verified FROM users WHERE email = $1 AND is_guest = false`,
+    [email],
   );
-  const row = result.rows[0];
-  if (!row) throw new Error("register_failed");
-  await ensureStatsRow(row.id);
-  if (req.guestUserId) guests.delete(req.guestUserId);
-  return rowToAuth(row);
+  const row = r.rows[0];
+  if (!row) {
+    return {
+      ok: true,
+      message: "Если аккаунт существует, письмо отправлено.",
+    };
+  }
+  if (row.email_verified) {
+    return { ok: true, message: "Email уже подтверждён. Можно войти." };
+  }
+
+  const rawToken = randomBytes(32).toString("hex");
+  const tokenHash = hashVerifyToken(rawToken);
+  const expiresAt = new Date(Date.now() + EMAIL_VERIFY_TTL_MS);
+  await pool.query(
+    `UPDATE users SET email_verification_token_hash = $2, email_verification_expires_at = $3
+     WHERE id = $1`,
+    [row.id, tokenHash, expiresAt],
+  );
+  await sendVerificationEmail(email, buildVerificationUrl(rawToken), row.display_name);
+
+  return {
+    ok: true,
+    message: "Письмо с подтверждением отправлено повторно.",
+  };
 }
 
 export async function login(req: LoginRequest): Promise<AuthResponse | null> {
@@ -202,8 +326,9 @@ export async function login(req: LoginRequest): Promise<AuthResponse | null> {
     equipped_skin_id: string;
     owned_skin_ids: string[];
     password_hash: string;
+    email_verified: boolean;
   }>(
-    `SELECT id, display_name, equipped_skin_id, owned_skin_ids, password_hash
+    `SELECT id, display_name, equipped_skin_id, owned_skin_ids, password_hash, email_verified
      FROM users WHERE email = $1 AND is_guest = false`,
     [email],
   );
@@ -211,6 +336,9 @@ export async function login(req: LoginRequest): Promise<AuthResponse | null> {
   if (!row) return null;
   const ok = await bcrypt.compare(password, row.password_hash);
   if (!ok) return null;
+  if (!row.email_verified) {
+    throw new Error("email_not_verified");
+  }
   if (req.guestUserId) {
     const g = guests.get(req.guestUserId);
     if (g) {
@@ -247,8 +375,9 @@ export async function getProfile(userId: string, guest: boolean): Promise<Profil
     display_name: string;
     equipped_skin_id: string;
     owned_skin_ids: string[];
+    email_verified: boolean;
   }>(
-    `SELECT id, email, display_name, equipped_skin_id, owned_skin_ids
+    `SELECT id, email, display_name, equipped_skin_id, owned_skin_ids, email_verified
      FROM users WHERE id = $1 AND is_guest = false`,
     [userId],
   );
@@ -261,6 +390,7 @@ export async function getProfile(userId: string, guest: boolean): Promise<Profil
     equippedSkinId: row.equipped_skin_id,
     ownedSkinIds: row.owned_skin_ids,
     guest: false,
+    emailVerified: row.email_verified,
     stats,
   };
 }

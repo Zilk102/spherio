@@ -22,7 +22,7 @@ import {
 } from "../api/http.js";
 import { clearAuth, loadAuth, saveAuth } from "../lib/session.js";
 import { joinPrivateArena, joinPublicArena } from "../net/colyseus.js";
-import { isTouchPrimaryDevice } from "../lib/touchDevice.js";
+import { syncTouchGameChrome } from "../lib/touchDevice.js";
 import type { Room } from "colyseus.js";
 import { Game } from "../game/Game.js";
 import { SkinPreview3D } from "../game/SkinPreview3D.js";
@@ -151,14 +151,36 @@ export class MainMenu {
   }
 
   private bindLeave(): void {
+    let menuTapLock = false;
     const openPause = (e?: Event) => {
       e?.preventDefault();
       e?.stopPropagation();
+      if (menuTapLock) return;
+      menuTapLock = true;
+      window.setTimeout(() => {
+        menuTapLock = false;
+      }, 400);
       this.openPauseMenu();
     };
     const btn = document.getElementById("btn-leave");
-    btn?.addEventListener("click", openPause);
-    btn?.addEventListener("pointerdown", (e) => e.stopPropagation());
+    if (!btn) return;
+    const onMenuTap = (e: Event) => {
+      if (e.type === "pointerdown" && (e as PointerEvent).pointerType === "mouse") return;
+      openPause(e);
+    };
+    btn.addEventListener("click", openPause);
+    btn.addEventListener("pointerdown", onMenuTap, { passive: false });
+    document.addEventListener(
+      "pointerdown",
+      (e) => {
+        if (e.pointerType === "mouse") return;
+        const t = e.target;
+        if (t instanceof Element && t.closest("#btn-leave")) {
+          onMenuTap(e);
+        }
+      },
+      { capture: true, passive: false },
+    );
     window.addEventListener("sphere3d:leave-game", (e: Event) => {
       const detail = (e as CustomEvent<{ restartPublic?: boolean }>).detail;
       if (detail?.restartPublic) {
@@ -201,10 +223,7 @@ export class MainMenu {
     menu?.classList.add("hidden");
     menu?.setAttribute("aria-hidden", "true");
     document.getElementById("chat-root")?.classList.remove("hidden");
-    document.getElementById("controls")?.classList.remove("hidden");
-    if (isTouchPrimaryDevice()) {
-      document.getElementById("controls")?.classList.remove("touch-only");
-    }
+    syncTouchGameChrome(true);
     this.cb.setStatus("");
   }
 
@@ -214,11 +233,12 @@ export class MainMenu {
     menu?.setAttribute("aria-hidden", "true");
     document.getElementById("welcome")?.classList.remove("hidden");
     document.getElementById("hud")?.classList.add("hidden");
+    document.getElementById("btn-leave")?.classList.add("hidden");
     document.getElementById("game-ui")?.classList.add("hidden");
     document.getElementById("chat-root")?.classList.add("hidden");
     document.getElementById("match-end")?.classList.add("hidden");
-    document.body.classList.remove("in-game", "in-game--touch");
-    document.getElementById("controls")?.classList.add("hidden");
+    document.body.classList.remove("in-game");
+    syncTouchGameChrome(false);
   }
 
   private applyInviteFromUrl(): void {
@@ -585,26 +605,28 @@ export class MainMenu {
     }
     try {
       const guestId = loadAuth()?.auth.userId;
-      this.auth = await authRegister({
+      const pending = await authRegister({
         email,
         password,
         displayName,
         guestUserId: guestId,
       });
-      saveAuth(this.auth, false);
-      this.isGuest = false;
       this.profileEmail = email;
-      this.skinId = this.auth.equippedSkinId || this.skinId;
-      localStorage.setItem(SKIN_KEY, this.skinId);
-      this.updateUserPill(false);
-      this.updateSkinPreview();
-      this.renderSkins();
-      this.syncNickUi();
-      this.updateAccountPanel();
+      this.authTab = "login";
+      this.syncAuthTabUi();
       this.closeDrawer();
-      this.cb.setStatus(`Аккаунт создан · ник ${this.auth.displayName}`);
+      this.cb.setStatus(
+        `${pending.message} После подтверждения войдите с тем же email и паролем.`,
+      );
     } catch (e) {
-      this.cb.setStatus(e instanceof Error ? e.message : "Ошибка регистрации");
+      const msg = e instanceof Error ? e.message : "";
+      if (msg === "email_taken") {
+        this.cb.setStatus("Этот email уже зарегистрирован");
+      } else if (msg === "email_not_verified" || msg === "smtp_not_configured") {
+        this.cb.setStatus("Почта сервера не настроена. Напишите в поддержку.");
+      } else {
+        this.cb.setStatus(msg || "Ошибка регистрации");
+      }
     }
   }
 
@@ -630,8 +652,13 @@ export class MainMenu {
       this.updateAccountPanel();
       this.closeDrawer();
       this.cb.setStatus(`Добро пожаловать, ${this.auth.displayName}!`);
-    } catch {
-      this.cb.setStatus("Неверный email или пароль");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "";
+      if (msg === "email_not_verified") {
+        this.cb.setStatus("Подтвердите email по ссылке из письма (проверьте «Спам»).");
+      } else {
+        this.cb.setStatus("Неверный email или пароль");
+      }
     }
   }
 
@@ -805,6 +832,7 @@ export class MainMenu {
   private enterGame(): void {
     document.getElementById("welcome")?.classList.add("hidden");
     document.getElementById("hud")?.classList.remove("hidden");
+    document.getElementById("btn-leave")?.classList.remove("hidden");
     document.getElementById("game-ui")?.classList.remove("hidden");
     document.getElementById("chat-root")?.classList.remove("hidden");
     this.cb.onEnterGame();

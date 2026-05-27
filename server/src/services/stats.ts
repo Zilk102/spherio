@@ -1,5 +1,6 @@
 import { scoreFromRadius } from "@spherio/shared";
 import type { UserStats } from "@spherio/shared";
+import type { PoolClient } from "pg";
 import { pool } from "../db/pool.js";
 
 const guestStats = new Map<string, UserStats>();
@@ -46,9 +47,10 @@ export async function getStats(userId: string, guest: boolean): Promise<UserStat
   };
 }
 
-export async function ensureStatsRow(userId: string): Promise<void> {
-  if (!pool) return;
-  await pool.query(
+export async function ensureStatsRow(userId: string, client?: PoolClient): Promise<void> {
+  const db = client ?? pool;
+  if (!db) return;
+  await db.query(
     `INSERT INTO user_stats (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING`,
     [userId],
   );

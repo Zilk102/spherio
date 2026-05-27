@@ -56,11 +56,8 @@ import { PelletManager as PelletUtil } from "../game/PelletManager.js";
 import { InputRateLimiter } from "../game/rateLimit.js";
 import { enforceSpeedLimits } from "../game/anticheat.js";
 import { sanitizeInput } from "../game/inputValidate.js";
-import {
-  applyBoostMassDrain,
-  handleBoost,
-  pushKillFeed,
-} from "../game/PlayerActions.js";
+import { applyBoostMassDrain, handleBoost } from "../game/PlayerActions.js";
+import type { KillFeedEntry } from "@spherio/shared";
 
 interface SessionMeta {
   playerId: string;
@@ -109,6 +106,7 @@ export class ArenaRoom extends Room<ArenaState> {
   private lastSplitAttemptMs = new Map<string, number>();
   /** Время (ms), когда пара частей впервые соприкоснулась в этом контакте. */
   private splitContactSince = new Map<string, number>();
+  private killFeedSeq = 0;
 
   async onCreate(): Promise<void> {
     this.setState(new ArenaState());
@@ -134,6 +132,10 @@ export class ArenaRoom extends Room<ArenaState> {
         this.targetSystem.assignTargetFor(botId, this.state, now, this.invuln);
       }
     }
+
+    this.onMessage("ping", (client) => {
+      client.send("pong", {});
+    });
 
     this.onMessage("input", (client, msg: InputMessage) => {
       if (!this.matchActive) return;
@@ -630,6 +632,7 @@ export class ArenaRoom extends Room<ArenaState> {
   private tick(dtMs: number): void {
     const dt = Math.min(dtMs / 1000, TICK_DT * 2);
     const nowMs = Date.now();
+    this.state.serverTime = nowMs;
 
     // Серверный таймер матча.
     if (this.matchActive && this.state.matchEndsAt > 0 && nowMs >= this.state.matchEndsAt) {
@@ -730,7 +733,7 @@ export class ArenaRoom extends Room<ArenaState> {
         this.pelletData,
       );
       pelletsDirty = true;
-      pushKillFeed(this.state, e.killerName, e.victimName, now);
+      this.broadcastKill(e.killerName, e.victimName, now);
 
       // Цели: убитого как цель убрать у всех, у кого она стояла; убийце — новую цель.
       this.targetSystem.onPlayerEaten(
@@ -799,6 +802,16 @@ export class ArenaRoom extends Room<ArenaState> {
     }
   }
 
+  private broadcastKill(killerName: string, victimName: string, at: number): void {
+    const msg: KillFeedEntry = {
+      killerName,
+      victimName,
+      at,
+      seq: ++this.killFeedSeq,
+    };
+    this.broadcast("kill", msg);
+  }
+
   private syncPlayers(now: number): void {
     for (const [id, ps] of this.state.players) {
       const body = this.physics.getPlayer(id);
@@ -824,15 +837,46 @@ export class ArenaRoom extends Room<ArenaState> {
   }
 
   private syncPellets(): void {
-    this.state.pellets.clear();
-    for (const p of this.pelletData.values()) {
-      const s = new PelletState();
-      s.id = p.id;
+    const live = this.pelletData;
+    const arr = this.state.pellets;
+    // swap-pop вместо splice — меньше refCount warnings в @colyseus/schema
+    let i = 0;
+    while (i < arr.length) {
+      const row = arr[i];
+      if (row && live.has(row.id)) {
+        i++;
+        continue;
+      }
+      const last = arr.length - 1;
+      if (i < last) {
+        const tail = arr[last];
+        if (row && tail) {
+          row.id = tail.id;
+          row.x = tail.x;
+          row.y = tail.y;
+          row.z = tail.z;
+          row.kind = tail.kind;
+        }
+      }
+      arr.pop();
+    }
+    const byId = new Map<string, PelletState>();
+    for (let j = 0; j < arr.length; j++) {
+      const row = arr[j];
+      if (row?.id) byId.set(row.id, row);
+    }
+    for (const p of live.values()) {
+      let s = byId.get(p.id);
+      if (!s) {
+        s = new PelletState();
+        s.id = p.id;
+        arr.push(s);
+        byId.set(p.id, s);
+      }
       s.x = p.x;
       s.y = p.y;
       s.z = p.z;
       s.kind = p.kind;
-      this.state.pellets.push(s);
     }
   }
 
@@ -861,7 +905,7 @@ export class ArenaRoom extends Room<ArenaState> {
       scatterMass,
       this.pelletData,
     );
-    pushKillFeed(this.state, "Ёж-шар", victimName, now);
+    this.broadcastKill("Ёж-шар", victimName, now);
 
     const ownerId = victim.ownerId;
     const parts = this.sessionParts.get(ownerId);
@@ -917,10 +961,28 @@ export class ArenaRoom extends Room<ArenaState> {
   }
 
   private syncHedgehogs(nowMs = Date.now()): void {
-    this.state.hedgehogs.clear();
-    for (const h of this.hedgehogs.getAll()) {
-      const s = new HedgehogState();
-      s.id = h.id;
+    const all = this.hedgehogs.getAll();
+    const arr = this.state.hedgehogs;
+    const liveIds = new Set<string>();
+    for (const h of all) liveIds.add(h.id);
+    for (let i = arr.length - 1; i >= 0; i--) {
+      const row = arr[i];
+      if (row && !liveIds.has(row.id)) arr.splice(i, 1);
+    }
+    for (const h of all) {
+      let s: HedgehogState | undefined;
+      for (let i = 0; i < arr.length; i++) {
+        const row = arr[i];
+        if (row && row.id === h.id) {
+          s = row;
+          break;
+        }
+      }
+      if (!s) {
+        s = new HedgehogState();
+        s.id = h.id;
+        arr.push(s);
+      }
       s.x = h.x;
       s.y = GROUND_Y + h.radius;
       s.z = h.z;
@@ -930,7 +992,6 @@ export class ArenaRoom extends Room<ArenaState> {
       s.qy = q.qy;
       s.qz = q.qz;
       s.qw = q.qw;
-      this.state.hedgehogs.push(s);
     }
   }
 }

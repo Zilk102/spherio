@@ -103,7 +103,9 @@ export async function joinPrivateArena(opts: JoinOptions): Promise<Room> {
   return room;
 }
 
-export function getPing(room: Room): number {
-  const conn = room.connection as { rtt?: number; latency?: number } | undefined;
-  return conn?.rtt ?? conn?.latency ?? 0;
-}
+export {
+  attachRoomPing,
+  detachRoomPing,
+  getRoomPing as getPing,
+  tickRoomPing,
+} from "./ping.js";

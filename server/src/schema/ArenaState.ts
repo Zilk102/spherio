@@ -46,18 +46,12 @@ export class HedgehogState extends Schema {
   @type("number") qw = 1;
 }
 
-export class KillFeedEntryState extends Schema {
-  @type("string") killerName = "";
-  @type("string") victimName = "";
-  @type("number") at = 0;
-  @type("uint32") seq = 0;
-}
-
 export class ArenaState extends Schema {
   @type({ map: PlayerState }) players = new MapSchema<PlayerState>();
   @type([PelletState]) pellets = new ArraySchema<PelletState>();
   @type([HedgehogState]) hedgehogs = new ArraySchema<HedgehogState>();
-  @type([KillFeedEntryState]) killFeed = new ArraySchema<KillFeedEntryState>();
+  /** Серверное время (ms epoch) последнего тика, для интерполяции на клиенте. */
+  @type("number") serverTime = 0;
   /** Серверное время старта матча (ms epoch). 0 — не запущен. */
   @type("number") matchStartedAt = 0;
   /** Серверное время окончания матча (ms epoch). 0 — не запланирован. */

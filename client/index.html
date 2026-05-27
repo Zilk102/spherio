@@ -2,9 +2,17 @@
 <html lang="ru">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>Sphere3D — Сферы 3D</title>
     <meta name="description" content="Сферы 3D — 3D арена в браузере. Катись, ешь, расти. sphere3d.ru" />
+    <meta name="theme-color" content="#04080f" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Sphere3D" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -254,9 +262,11 @@
 
       <!-- Игровой HUD -->
       <div id="hud" class="hud hidden">
-        <div class="hud-card hud-card--player">
-          <div id="hud-name" class="hud-name"></div>
-          <div id="hud-stats" class="hud-stats"></div>
+        <div class="hud-col hud-col--left">
+          <div class="hud-card hud-card--player">
+            <div id="hud-name" class="hud-name"></div>
+            <div id="hud-stats" class="hud-stats"></div>
+          </div>
           <div id="hud-target" class="hud-target hidden">
             <span class="hud-target-icon" aria-hidden="true">◢◣</span>
             <span class="hud-target-text">
@@ -272,13 +282,16 @@
           <span class="hud-timer-label">До конца матча</span>
           <span id="hud-timer-value" class="hud-timer-value">--:--</span>
         </div>
-        <div class="hud-card hud-card--board">
-          <div id="hud-leader" class="hud-leader"></div>
-          <div id="hud-ping" class="hud-ping"></div>
+        <div class="hud-col hud-col--right">
+          <div class="hud-card hud-card--board">
+            <div id="hud-leader" class="hud-leader"></div>
+            <div id="hud-ping" class="hud-ping"></div>
+          </div>
         </div>
         <div id="hud-controls" class="hud-keys"></div>
-        <button type="button" id="btn-leave" class="hud-leave">Меню</button>
       </div>
+
+      <button type="button" id="btn-leave" class="hud-leave hidden" aria-label="Меню паузы">Меню</button>
 
       <div id="in-game-menu" class="in-game-menu hidden" aria-hidden="true">
         <div class="in-game-menu-card">
@@ -338,8 +351,10 @@
         </div>
         <div class="action-cluster">
           <button id="btn-boost" type="button" class="action-btn action-btn--boost" data-key="⇧"><kbd>⇧</kbd><span>Boost</span></button>
-          <button id="btn-brake" type="button" class="action-btn action-btn--brake" data-key="␣"><kbd>␣</kbd><span>Стоп</span></button>
-          <button id="btn-split" type="button" class="action-btn action-btn--split" data-key="E"><kbd>E</kbd><span>Split</span></button>
+          <div class="action-stack action-stack--right">
+            <button id="btn-split" type="button" class="action-btn action-btn--split" data-key="E"><kbd>E</kbd><span>Split</span></button>
+            <button id="btn-brake" type="button" class="action-btn action-btn--brake" data-key="␣"><kbd>␣</kbd><span>Стоп</span></button>
+          </div>
         </div>
       </div>
     </div>

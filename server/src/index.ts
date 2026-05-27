@@ -14,7 +14,14 @@ async function main(): Promise<void> {
   await migrate();
 
   const app = express();
-  app.use(cors());
+  const corsOrigin = process.env.CORS_ORIGIN?.trim();
+  app.use(
+    cors(
+      corsOrigin
+        ? { origin: corsOrigin.split(",").map((s) => s.trim()), credentials: true }
+        : undefined,
+    ),
+  );
   app.use(express.json());
 
   const httpServer = createServer(app);

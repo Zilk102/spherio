@@ -41,6 +41,7 @@ export interface ProfileResponse {
   ownedSkinIds: string[];
   guest: boolean;
   email?: string;
+  emailVerified?: boolean;
   stats: UserStats;
 }
 
@@ -51,6 +52,27 @@ export interface AuthResponse {
   displayName: string;
   equippedSkinId: string;
   ownedSkinIds: string[];
+}
+
+/** POST /api/auth/register — аккаунт создан, нужно подтвердить почту. */
+export interface RegisterPendingResponse {
+  ok: true;
+  email: string;
+  message: string;
+}
+
+export interface VerifyEmailResponse {
+  ok: boolean;
+  error?: "invalid_token" | "expired" | "already_verified";
+}
+
+export interface ResendVerificationRequest {
+  email: string;
+}
+
+export interface ResendVerificationResponse {
+  ok: true;
+  message: string;
 }
 
 /** PATCH /api/profile */
