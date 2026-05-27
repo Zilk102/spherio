@@ -14,10 +14,8 @@ import {
   Color3,
   DynamicTexture,
   Material,
-  MeshBuilder,
   StandardMaterial,
   Texture,
-  Vector3,
   type Mesh,
   type Scene,
 } from "@babylonjs/core";
@@ -31,6 +29,7 @@ import {
   paintBowlingTexture,
   paintFootballTexture,
   paintVolleyballTexture,
+  paintEmojiTexture,
 } from "./sphereTexturePaint.js";
 
 /**
@@ -162,79 +161,28 @@ export function getSphereBaseMaterial(
     );
     mat.specularPower = 220;
     mat.specularColor = new Color3(0.9, 0.9, 0.95);
-  } else if (skin.kind === "emoji") {
-    // Чистый цвет шара — лицо ляжет наклейкой отдельной mesh’ью
-    mat.diffuseColor = colorTo(tint);
+  } else if (skin.kind === "emoji" && skin.emoji) {
+    const emoji = skin.emoji;
+    // Эмодзи в UV-текстуре — крутится вместе со сферой (CreateDecal в игре отрывается).
+    mat.diffuseTexture = makeProceduralTexture(
+      scene,
+      `emoji_${emoji}_${tint.toString(16)}_${SPHERE_TEX_VERSION}`,
+      (ctx) => blitImageData(ctx, paintEmojiTexture(SPHERE_TEX_SIZE, emoji, tint)),
+    );
+    mat.specularPower = 48;
   }
 
   baseCache.set(key, mat);
   return mat;
 }
 
-/** Текстура декали: квадратный канвас с прозрачным фоном и эмодзи в центре */
-function getDecalMaterial(scene: Scene, emoji: string): StandardMaterial {
-  const key = `v${SPHERE_TEX_VERSION}_decal_${emoji}`;
-  const decalCache = cachesFor(scene).decal;
-  const cached = decalCache.get(key);
-  if (cached) return cached;
-
-  const E = 512;
-  const tex = new DynamicTexture(
-    `decalTex_${key}`,
-    { width: E, height: E },
-    scene,
-    true,
-    Texture.TRILINEAR_SAMPLINGMODE,
-  );
-  tex.hasAlpha = true;
-  const ctx = tex.getContext() as CanvasRenderingContext2D;
-  ctx.clearRect(0, 0, E, E);
-  ctx.font = `${Math.floor(E * 0.82)}px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(emoji, E / 2, E * 0.54);
-  tex.update();
-
-  const mat = new StandardMaterial(`decalMat_${key}`, scene);
-  mat.diffuseTexture = tex;
-  mat.useAlphaFromDiffuseTexture = true;
-  mat.transparencyMode = Material.MATERIAL_ALPHABLEND;
-  mat.disableLighting = true;
-  mat.emissiveColor = new Color3(1, 1, 1);
-  mat.zOffset = -2;
-  mat.backFaceCulling = true;
-  decalCache.set(key, mat);
-  return mat;
-}
-
-/**
- * Наклеить эмодзи на переднюю часть сферы (если у скина есть emoji).
- * Сфера передаётся в локальных координатах (диаметр=1). Декаль становится её ребёнком.
- * https://doc.babylonjs.com/features/featuresDeepDive/mesh/decals
- */
+/** @deprecated В игре эмодзи рисуются в diffuseTexture; отдельная декаль не используется. */
 export function attachSkinDecal(
-  scene: Scene,
-  sphere: Mesh,
-  skinId: string,
+  _scene: Scene,
+  _sphere: Mesh,
+  _skinId: string,
 ): Mesh | null {
-  const skin = getSkin(skinId);
-  if (!skin || skin.kind !== "emoji" || !skin.emoji) return null;
-
-  const sphereRadius = 0.5;
-  const worldFront = sphere.getAbsolutePosition().add(new Vector3(0, 0, sphereRadius));
-  const decal = MeshBuilder.CreateDecal(
-    `decal_${sphere.name}_${skinId}`,
-    sphere,
-    {
-      position: worldFront,
-      normal: new Vector3(0, 0, 1),
-      size: new Vector3(0.9, 0.9, 0.6),
-    },
-  );
-  decal.material = getDecalMaterial(scene, skin.emoji);
-  decal.setParent(sphere);
-  decal.isPickable = false;
-  return decal;
+  return null;
 }
 
 /**

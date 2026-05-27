@@ -483,7 +483,7 @@ export function paintBilliardTexture(size: number, color: number, num: number): 
   });
 }
 
-/** @deprecated — теперь эмодзи делаются через Babylon CreateDecal в skinTextures.ts */
+/** Эмодзи на UV-сфере (крутится вместе с мешем). */
 export function paintEmojiTexture(size: number, emoji: string, tint: number): ImageData {
   const E = 384;
   const emojiCanvas = document.createElement("canvas");

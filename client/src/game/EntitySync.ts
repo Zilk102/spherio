@@ -262,7 +262,6 @@ export class EntitySync {
         node.rotationQuaternion = Quaternion.Identity();
         node.material = this.playerMat(p.skinId, p.color);
         this.players.set(p.id, node);
-        this.applyDecal(p.id, node, p.skinId);
 
         shadow = MeshBuilder.CreateDisc(
           `shadow_${p.id}`,
@@ -347,7 +346,6 @@ export class EntitySync {
         this.playerMatKeys.set(p.id, matKey);
         if (prevSkin !== p.skinId) {
           this.disposeDecal(p.id);
-          this.applyDecal(p.id, node, p.skinId);
         }
       }
       const mat = node.material as StandardMaterial;
