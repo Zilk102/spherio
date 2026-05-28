@@ -312,6 +312,83 @@
             <p class="death-sub">Респавн через мгновение…</p>
           </div>
         </div>
+        <div
+          id="how-to-play"
+          class="how-to-play hidden"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="how-to-play-title"
+          aria-hidden="true"
+        >
+          <div class="how-to-play-card">
+            <h2 id="how-to-play-title" class="how-to-play-title">Суть игры</h2>
+
+            <div class="htp-grid">
+              <section class="htp-panel htp-panel--eat" aria-label="Еда на арене">
+                <h3 class="htp-panel-title htp-panel-title--good">Собирай</h3>
+                <div class="htp-pellets" aria-hidden="true">
+                  <div class="htp-pellet-item">
+                    <span class="htp-pellet htp-pellet--green"></span>
+                    <span class="htp-pellet-name">Зелёный</span>
+                    <span class="htp-pellet-hint">мало очков</span>
+                  </div>
+                  <div class="htp-pellet-item">
+                    <span class="htp-pellet htp-pellet--blue"></span>
+                    <span class="htp-pellet-name">Синий</span>
+                    <span class="htp-pellet-hint">больше</span>
+                  </div>
+                  <div class="htp-pellet-item">
+                    <span class="htp-pellet htp-pellet--red"></span>
+                    <span class="htp-pellet-name">Красный</span>
+                    <span class="htp-pellet-hint">много</span>
+                  </div>
+                </div>
+              </section>
+
+              <section class="htp-panel htp-panel--danger" aria-label="Опасность">
+                <h3 class="htp-panel-title htp-panel-title--bad">Избегай</h3>
+                <div class="htp-hedge-wrap">
+                  <canvas id="how-to-play-hedge-canvas" aria-hidden="true"></canvas>
+                </div>
+                <p class="htp-hedge-caption">Шар-ёж · разнесёт на части</p>
+              </section>
+            </div>
+
+            <div class="htp-chain" aria-label="Как растёшь">
+              <div class="htp-chain-step">
+                <span class="htp-chain-icon">🍽</span>
+                <span class="htp-chain-label">Еда</span>
+              </div>
+              <span class="htp-chain-arrow" aria-hidden="true">→</span>
+              <div class="htp-chain-step">
+                <span class="htp-chain-icon">★</span>
+                <span class="htp-chain-label">Очки</span>
+              </div>
+              <span class="htp-chain-arrow" aria-hidden="true">→</span>
+              <div class="htp-chain-step">
+                <span class="htp-chain-icon">●</span>
+                <span class="htp-chain-label">Масса</span>
+              </div>
+              <span class="htp-chain-arrow" aria-hidden="true">→</span>
+              <div class="htp-chain-step htp-chain-step--warn">
+                <span class="htp-chain-icon">⚓</span>
+                <span class="htp-chain-label">Тяжелее<br />рулить</span>
+              </div>
+            </div>
+
+            <p class="htp-footnote">Крупнее соперника — можно съесть. В HUD иногда есть <strong>цель</strong> с бонусом.</p>
+
+            <div class="htp-footer">
+              <label class="how-to-play-never">
+                <input type="checkbox" id="how-to-play-never" />
+                Больше не показывать
+              </label>
+              <button type="button" id="how-to-play-ok" class="btn btn-primary how-to-play-ok">
+                Понятно!
+              </button>
+            </div>
+          </div>
+        </div>
         <div id="match-end" class="match-end hidden">
           <div class="match-end-card">
             <p id="match-end-title" class="match-end-title">Итоги матча</p>

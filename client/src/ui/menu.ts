@@ -26,6 +26,7 @@ import { syncTouchGameChrome } from "../lib/touchDevice.js";
 import type { Room } from "colyseus.js";
 import { Game } from "../game/Game.js";
 import { SkinPreview3D } from "../game/SkinPreview3D.js";
+import { getHowToPlayOverlay } from "./howToPlay.js";
 
 const SKIN_KEY = "sphere3d_skin";
 const SKIN_COLOR_KEY = "sphere3d_skin_color";
@@ -836,12 +837,18 @@ export class MainMenu {
     document.getElementById("game-ui")?.classList.remove("hidden");
     document.getElementById("chat-root")?.classList.remove("hidden");
     this.cb.onEnterGame();
+    const game = this.game;
+    if (game) {
+      const shown = getHowToPlayOverlay().tryShow(() => game.setMenuOpen(false));
+      if (shown) game.setMenuOpen(true);
+    }
   }
 
   async leaveGame(): Promise<void> {
     if (this.leavePromise) return this.leavePromise;
 
     this.leavePromise = (async () => {
+      getHowToPlayOverlay().hideIfVisible();
       const game = this.game;
       this.game = null;
       this.restoreMenuUi();
