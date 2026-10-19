@@ -8,7 +8,7 @@ import paramiko
 
 ROOT = Path(__file__).resolve().parents[1]
 PUB = (ROOT / "deploy" / "keys" / "spherio_deploy.pub").read_text(encoding="utf-8").strip()
-HOST = sys.argv[1] if len(sys.argv) > 1 else "5.42.98.55"
+HOST = sys.argv[1] if len(sys.argv) > 1 else os.environ["SPHERIO_HOST"]
 USER = "root"
 PASSWORD = os.environ.get("SSH_BOOTSTRAP_PASS")
 if not PASSWORD:

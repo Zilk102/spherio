@@ -36,7 +36,15 @@ export interface VerifiedToken {
 
 const guests = new Map<string, GuestUser>();
 
-const JWT_SECRET = process.env.JWT_SECRET ?? "dev-secret-change-me";
+const DEV_JWT_SECRET = "dev-secret-change-me";
+const JWT_SECRET = process.env.JWT_SECRET?.trim() || DEV_JWT_SECRET;
+
+if (
+  process.env.NODE_ENV === "production" &&
+  (JWT_SECRET === DEV_JWT_SECRET || JWT_SECRET === "change-me-in-production")
+) {
+  throw new Error("JWT_SECRET must be set to a strong random value in production");
+}
 
 function freeSkinIds(): string[] {
   return listFreeSkins().map((s) => s.id);
@@ -67,7 +75,7 @@ function toAuthResponse(user: {
   };
 }
 
-/** Декодирует JWT access/refresh или legacy base64url гостевой токен. */
+/** Декодирует JWT access-токен. Refresh-токены и неподписанные токены не принимаются. */
 export function verifyToken(token: string): VerifiedToken | null {
   try {
     const payload = jwt.verify(token, JWT_SECRET) as {
@@ -75,18 +83,10 @@ export function verifyToken(token: string): VerifiedToken | null {
       guest?: boolean;
       typ?: string;
     };
-    if (!payload.sub) return null;
-    if (payload.typ && payload.typ !== "access" && payload.typ !== "refresh") return null;
+    if (!payload.sub || payload.typ !== "access") return null;
     return { userId: payload.sub, guest: !!payload.guest };
   } catch {
-    try {
-      const json = Buffer.from(token, "base64url").toString("utf8");
-      const data = JSON.parse(json) as { sub?: string };
-      if (!data.sub) return null;
-      return { userId: data.sub, guest: true };
-    } catch {
-      return null;
-    }
+    return null;
   }
 }
 

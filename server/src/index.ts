@@ -14,6 +14,7 @@ async function main(): Promise<void> {
   await migrate();
 
   const app = express();
+  app.set("trust proxy", 1);
   const corsOrigin = process.env.CORS_ORIGIN?.trim();
   app.use(
     cors(

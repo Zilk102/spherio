@@ -7,3 +7,6 @@ deploy/keys/
 deploy/secrets/.env.production
 deploy/secrets/mail.local
 deploy/secrets/CREDENTIALS.txt
+__pycache__/
+*.pyc
+deploy/secrets/*.local

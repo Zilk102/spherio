@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Донастройка nginx + Let's Encrypt (если deploy оборвался на этом шаге)."""
+import os
 import sys
 from pathlib import Path
 
@@ -7,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from remote import connect, run  # type: ignore  # noqa: E402
 
-HOST = "5.42.98.55"
+HOST = os.environ["SPHERIO_HOST"]  # IP/hostname VPS, обязателен
 ENV = ROOT / "deploy" / "secrets" / ".env.production"
 cert_email = "noreply@sphere3d.ru"
 if ENV.exists():

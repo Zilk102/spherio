@@ -18,7 +18,7 @@ import paramiko
 ROOT = Path(__file__).resolve().parents[1]
 KEY = ROOT / "deploy" / "keys" / "spherio_deploy"
 ENV_FILE = ROOT / "deploy" / "secrets" / ".env.production"
-HOST = os.environ.get("SPHERIO_HOST", "5.42.98.55")
+HOST = os.environ["SPHERIO_HOST"]  # IP/hostname VPS, обязателен
 USER = os.environ.get("SPHERIO_SSH_USER", "root")
 REMOTE_DIR = "/opt/spherio"
 

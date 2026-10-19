@@ -8,7 +8,7 @@ import paramiko
 
 ROOT = Path(__file__).resolve().parents[1]
 KEY = ROOT / "deploy" / "keys" / "spherio_deploy"
-HOST = os.environ.get("SPHERIO_HOST", "5.42.98.55")
+HOST = os.environ["SPHERIO_HOST"]  # IP/hostname VPS, обязателен
 USER = os.environ.get("SPHERIO_SSH_USER", "root")
 USE_PASSWORD = "--pw" in sys.argv
 ARGS = [a for a in sys.argv[1:] if a != "--pw"]

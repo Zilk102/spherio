@@ -1,4 +1,4 @@
-import type { Express, Request } from "express";
+import type { Express, NextFunction, Request, Response } from "express";
 import type {
   AddFriendRequest,
   CreateLobbyRequest,
@@ -22,7 +22,7 @@ import {
   verifyToken,
 } from "../services/auth.js";
 import { addFriend, listFriends } from "../services/friends.js";
-import { getLeaderboard, submitScore } from "../services/leaderboard.js";
+import { getLeaderboard } from "../services/leaderboard.js";
 import { createPrivateLobby, getLobbyInfo } from "../services/lobby.js";
 import { buySkin } from "../services/shop.js";
 
@@ -32,11 +32,37 @@ function bearerToken(req: Request): string | null {
   return h.slice(7).trim() || null;
 }
 
+const AUTH_WINDOW_MS = 60_000;
+const AUTH_MAX_PER_WINDOW = 20;
+const authHits = new Map<string, { count: number; resetAt: number }>();
+
+/** Простой in-memory лимит запросов на IP для /api/auth/* (защита от перебора и спама письмами). */
+function authRateLimit(req: Request, res: Response, next: NextFunction): void {
+  const now = Date.now();
+  const key = req.ip ?? "unknown";
+  const hit = authHits.get(key);
+  if (!hit || hit.resetAt <= now) {
+    if (authHits.size > 10_000) {
+      for (const [k, v] of authHits) if (v.resetAt <= now) authHits.delete(k);
+    }
+    authHits.set(key, { count: 1, resetAt: now + AUTH_WINDOW_MS });
+    next();
+    return;
+  }
+  hit.count += 1;
+  if (hit.count > AUTH_MAX_PER_WINDOW) {
+    res.status(429).json({ error: "too_many_requests" });
+    return;
+  }
+  next();
+}
+
 export function mountApiRoutes(app: Express): void {
   app.use("/api", (req, res, next) => {
     res.setHeader("Content-Type", "application/json; charset=utf-8");
     next();
   });
+  app.use("/api/auth", authRateLimit);
 
   app.post("/api/auth/guest", (req, res) => {
     const body = req.body as GuestAuthRequest;
@@ -257,19 +283,5 @@ export function mountApiRoutes(app: Express): void {
     const period = req.query.period === "daily" ? "daily" : "all";
     const limit = Math.min(50, Math.max(5, Number(req.query.limit) || 20));
     res.json(await getLeaderboard(period, limit));
-  });
-
-  app.post("/api/leaderboard/submit", async (req, res) => {
-    const { userId, displayName, radius } = req.body as {
-      userId?: string;
-      displayName?: string;
-      radius?: number;
-    };
-    if (!userId || !displayName || typeof radius !== "number") {
-      res.status(400).json({ error: "invalid_body" });
-      return;
-    }
-    await submitScore(userId, displayName, radius);
-    res.json({ ok: true });
   });
 }

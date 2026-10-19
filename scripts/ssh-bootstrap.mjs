@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 /**
  * Однократно: копирует deploy-ключ на VPS (пароль только через env SSH_BOOTSTRAP_PASS).
- * node scripts/ssh-bootstrap.mjs root@5.42.98.55
+ * node scripts/ssh-bootstrap.mjs root@<server-ip>
  */
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "ssh2";
 
-const host = process.argv[2] ?? "root@5.42.98.55";
+const host = process.argv[2] ?? `root@${process.env.SPHERIO_HOST}`;
 const password = process.env.SSH_BOOTSTRAP_PASS;
 if (!password) {
   console.error("Задайте SSH_BOOTSTRAP_PASS (пароль root, один раз).");
