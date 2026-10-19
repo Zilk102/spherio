@@ -1,5 +1,7 @@
 # Sphere3D
 
+**English** · [Русский](README.ru.md)
+
 **A real-time multiplayer 3D arena in the browser: roll a sphere, eat pellets, outgrow everyone else.**
 Think agar.io, but with real rigid-body physics, a 3D camera and an authoritative server.
 
